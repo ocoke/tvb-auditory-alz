@@ -28,6 +28,7 @@ CONFIG_FILENAME = "resolved_config.json"
 ENVIRONMENT_FILENAME = "environment.json"
 INPUTS_FILENAME = "inputs.json"
 LOG_FILENAME = "run.log"
+ATTEMPT_ENVIRONMENT_DIRECTORY = "attempts"
 
 DEFAULT_RUNTIME_PACKAGES = (
     "numpy",
@@ -580,6 +581,9 @@ def write_run_manifest(
             "log": str(run_path / LOG_FILENAME),
             "input_directory": str(run_path / "inputs"),
             "checkpoint_directory": str(run_path / "checkpoints"),
+            "attempt_environment_directory": str(
+                run_path / ATTEMPT_ENVIRONMENT_DIRECTORY
+            ),
             "results_directory": str(run_path / "results"),
             "input_files": {
                 name: record["path"] for name, record in normalized_inputs.items()
@@ -591,6 +595,36 @@ def write_run_manifest(
     }
     atomic_write_json(manifest_path, manifest)
     return manifest
+
+
+def write_attempt_environment(
+    run_dir: str | os.PathLike[str],
+    *,
+    attempt: int,
+    environment: Mapping[str, Any],
+    recorded_at: datetime | None = None,
+) -> Path:
+    """Record the exact environment for one new or resumed run attempt."""
+
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise ValueError("attempt must be a positive integer")
+    run_path = Path(run_dir).resolve()
+    if not run_path.is_dir():
+        raise FileNotFoundError(f"run directory not found: {run_path}")
+    destination = (
+        run_path
+        / ATTEMPT_ENVIRONMENT_DIRECTORY
+        / f"attempt_{attempt:03d}_environment.json"
+    )
+    atomic_write_json(
+        destination,
+        {
+            "attempt": attempt,
+            "recorded_at": isoformat_utc(recorded_at),
+            "environment": canonicalize(environment),
+        },
+    )
+    return destination
 
 
 initialize_run_manifest = write_run_manifest

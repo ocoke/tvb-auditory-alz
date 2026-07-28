@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
+from .config import (
+    DT_CHECK_PROBES,
+    DT_CHECK_SEVERITIES,
+    SEVERITY_LABELS,
+)
 from .metrics import (
     a1_response_value,
     draw_matched_set,
@@ -12,6 +19,8 @@ from .metrics import (
     node_response_vector,
     normalize_to_baseline,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def summarize_main_stage(
@@ -345,23 +354,128 @@ def check_integration_step(
     main_network_df: pd.DataFrame,
     reference_network_df: pd.DataFrame,
     main_seed: int,
+    severities: tuple[float, ...] = DT_CHECK_SEVERITIES,
+    probes: tuple[str, ...] = DT_CHECK_PROBES,
+    networks: tuple[str, ...] = ("music", "speech"),
     threshold: float = 0.05,
 ) -> pd.DataFrame:
-    """Enforce the prespecified 1.0 ms versus 0.5 ms transfer gate."""
+    """Enforce the 1.0 ms versus 0.5 ms transfer gate at every endpoint."""
 
-    dt_main = main_network_df[
-        (main_network_df["seed"] == main_seed)
-        & (main_network_df["severity"] == 0.0)
-        & (main_network_df["probe"] == "2Hz")
-    ][["network", "transfer"]].rename(
-        columns={"transfer": "transfer_dt_1.0ms"}
+    if not severities or not probes or not networks:
+        raise ValueError(
+            "Convergence severities, probes, and networks must be non-empty."
+        )
+    if threshold <= 0.0:
+        raise ValueError("The convergence threshold must be positive.")
+
+    key_columns = ["severity", "probe", "network"]
+    metric_columns = ["transfer", "median_target_fit_r_squared"]
+    main_required = {"seed", *key_columns, *metric_columns}
+    reference_required = {*key_columns, *metric_columns}
+    missing_main_columns = sorted(main_required - set(main_network_df.columns))
+    missing_reference_columns = sorted(
+        reference_required - set(reference_network_df.columns)
     )
-    dt_reference = reference_network_df[
-        ["network", "transfer"]
-    ].rename(columns={"transfer": "transfer_dt_0.5ms"})
+    if missing_main_columns:
+        raise RuntimeError(
+            "Main integration-step results are missing required columns: "
+            + ", ".join(missing_main_columns)
+        )
+    if missing_reference_columns:
+        raise RuntimeError(
+            "Reference integration-step results are missing required columns: "
+            + ", ".join(missing_reference_columns)
+        )
+
+    expected_keys = {
+        (float(severity), str(probe), str(network))
+        for severity in severities
+        for probe in probes
+        for network in networks
+    }
+
+    def select_and_validate(
+        frame: pd.DataFrame,
+        *,
+        label: str,
+        seed: int | None,
+    ) -> pd.DataFrame:
+        selected = frame
+        if seed is not None:
+            selected = selected[selected["seed"] == seed]
+        selected = selected[
+            selected["severity"].isin(severities)
+            & selected["probe"].isin(probes)
+            & selected["network"].isin(networks)
+        ][key_columns + metric_columns].copy()
+
+        duplicate_rows = selected[
+            selected.duplicated(key_columns, keep=False)
+        ][key_columns].drop_duplicates()
+        if not duplicate_rows.empty:
+            duplicate_keys = sorted(
+                (
+                    float(row.severity),
+                    str(row.probe),
+                    str(row.network),
+                )
+                for row in duplicate_rows.itertuples(index=False)
+            )
+            raise RuntimeError(
+                f"{label} integration-step results contain duplicate "
+                f"coverage keys: {duplicate_keys}"
+            )
+
+        actual_keys = {
+            (float(row.severity), str(row.probe), str(row.network))
+            for row in selected[key_columns].itertuples(index=False)
+        }
+        missing_keys = sorted(expected_keys - actual_keys)
+        if missing_keys:
+            raise RuntimeError(
+                f"{label} integration-step results are missing required "
+                f"coverage keys: {missing_keys}"
+            )
+        return selected
+
+    dt_main = select_and_validate(
+        main_network_df,
+        label="Main",
+        seed=main_seed,
+    ).rename(
+        columns={
+            "transfer": "transfer_dt_1.0ms",
+            "median_target_fit_r_squared": (
+                "median_target_fit_r_squared_dt_1.0ms"
+            ),
+        }
+    )
+    dt_reference = select_and_validate(
+        reference_network_df,
+        label="Reference",
+        seed=None,
+    ).rename(
+        columns={
+            "transfer": "transfer_dt_0.5ms",
+            "median_target_fit_r_squared": (
+                "median_target_fit_r_squared_dt_0.5ms"
+            ),
+        }
+    )
     result = dt_main.merge(
-        dt_reference, on="network", validate="one_to_one"
+        dt_reference,
+        on=key_columns,
+        validate="one_to_one",
     )
+    result["condition"] = result["severity"].map(SEVERITY_LABELS)
+    if result["condition"].isna().any():
+        unknown = sorted(
+            result.loc[result["condition"].isna(), "severity"].unique()
+        )
+        raise RuntimeError(
+            "Integration-step results contain severities without labels: "
+            f"{unknown}"
+        )
     result["relative_difference"] = (
         (
             result["transfer_dt_1.0ms"]
@@ -369,7 +483,34 @@ def check_integration_step(
         ).abs()
         / result["transfer_dt_0.5ms"].abs().clip(lower=1e-15)
     )
-    if (result["relative_difference"] >= threshold).any():
+    result["fit_r_squared_difference"] = (
+        result["median_target_fit_r_squared_dt_1.0ms"]
+        - result["median_target_fit_r_squared_dt_0.5ms"]
+    ).abs()
+    result = result.sort_values(key_columns).reset_index(drop=True)
+    LOGGER.info(
+        "Integration-step convergence comparisons:\n%s",
+        result[
+            [
+                "condition",
+                "probe",
+                "network",
+                "transfer_dt_1.0ms",
+                "transfer_dt_0.5ms",
+                "relative_difference",
+                "median_target_fit_r_squared_dt_1.0ms",
+                "median_target_fit_r_squared_dt_0.5ms",
+                "fit_r_squared_difference",
+            ]
+        ].to_string(index=False),
+    )
+
+    failed_rows = result[result["relative_difference"] >= threshold]
+    if not failed_rows.empty:
+        LOGGER.error(
+            "Integration-step convergence failures:\n%s",
+            failed_rows.to_string(index=False),
+        )
         raise RuntimeError(
             "The 1.0 ms integration step failed the prespecified "
             f"{threshold:.0%} convergence check."

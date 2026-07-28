@@ -25,10 +25,12 @@ There is no project package to install. In particular, do **not** run
 `pip install .` or use an editable install. The only installation step is
 installing the pinned third-party dependencies.
 
-> `python main.py` starts the full `final` experiment immediately, without an
-> interactive confirmation. It performs 100 spatial shuffles and is expected
-> to take roughly 8.5 hours on comparable CPU hardware. Use `smoke` for an
-> initial technical check.
+> `python main.py` starts the `final`-mode experiment immediately, without an
+> interactive confirmation. It is configured for 100 spatial shuffles if the
+> required convergence gate passes and creates one worker per available logical
+> CPU. Wall-clock time depends strongly on the machine; the runner prints
+> elapsed time and an estimated time remaining as measurements become
+> available. Use `smoke` for an initial technical check.
 
 ## Requirements and one-time setup
 
@@ -75,9 +77,12 @@ python main.py --mode final
 
 | Mode | Purpose and workload |
 | --- | --- |
-| `smoke` | Technical end-to-end check using seed 11, baseline and high endpoints, 40 matched controls, and one spatial shuffle. Expect roughly 30 minutes on comparable hardware. It is not adequate for scientific interpretation. |
-| `pilot` | Intermediate check using seeds 11 and 23, all three perturbation levels, 200 matched controls, and two spatial shuffles. |
-| `final` | Full experiment using five numerical seeds, all three perturbation levels, 500 matched controls, four parameter-sensitivity scenarios, and 100 spatial shuffles. This is the default and makes 418 TVB calls including calibration. |
+| `smoke` | Gate-reaching technical diagnostic using seed 11, baseline and high endpoints, 40 matched controls, and one spatial shuffle. Its planned maximum is 29 TVB calls, 27 of which would appear in the run manifest. It is not adequate for scientific interpretation. |
+| `pilot` | Intermediate diagnostic using seeds 11 and 23, all three perturbation levels, 200 matched controls, and two spatial shuffles. Its planned maximum is 62 TVB calls, with 56 manifested. |
+| `final` | Full experiment using five numerical seeds, all three perturbation levels, 500 matched controls, four parameter-sensitivity scenarios, and 100 spatial shuffles. This is the default; its planned maximum is 422 TVB calls, with 410 manifested and 12 separately recorded calibration calls. |
+
+Those are resolved workloads, not a promise that every call will execute. All
+three modes stop after stage 3 if the required convergence gate fails.
 
 Numerical seeds probe sensitivity to initial conditions. They are repeated model
 runs, not participants or independent biological samples.
@@ -98,6 +103,39 @@ Show the complete command-line help with:
 ```bash
 python main.py --help
 ```
+
+### CPU use, progress, and timing
+
+The runner detects the logical CPUs available to the process and creates one
+spawned worker process per available CPU. Each worker uses one native numerical
+thread. This avoids multiplying a full BLAS/OpenMP thread pool inside every
+worker. Active CPU use is bounded by the number of independent blocks ready in
+the current stage; stages with enough blocks can use every available CPU.
+
+Checkpoint loading and writing remain in the parent process. Completed worker
+results are aggregated in their declared scientific order, rather than worker
+completion order, so parallel scheduling does not change table ordering or
+checkpoint identity.
+
+Progress messages are written both to the terminal and `run.log`. They identify
+the current stage and work unit and report completed/total TVB calls, percentage
+complete, elapsed time, and an ETA once enough current-run measurements exist.
+On resume, already verified checkpoints are reported as restored work. The ETA
+is an estimate and can change as the workflow moves between 1.0 ms, 0.5 ms, and
+shorter calibration simulations.
+
+The completion summary distinguishes:
+
+- **command elapsed time before the result-archive snapshot**, measured from
+  command entry and including setup, input verification, computation, and
+  output generation up to that snapshot; and
+- **aggregate simulation time**, the sum of all individual TVB simulation
+  durations, including calibration and simulations that ran concurrently.
+
+Because simulations overlap across workers, aggregate simulation time can be
+greater than command elapsed time. The archived `run.log` contains entries
+through the archive snapshot; the on-disk log also receives the final archive
+completion message.
 
 ## Offline use
 
@@ -134,6 +172,7 @@ Every new run receives a unique directory:
 <output-root>/<UTC timestamp>_<mode>_<digest>/
 ├── inputs/                 verified source-file copies
 ├── checkpoints/            restart state for bounded work units
+├── attempts/               environment details for each execution attempt
 ├── results/                CSV tables, metadata, and figures
 ├── run.log                 timestamped execution log
 ├── run_manifest.json       resolved configuration and provenance
@@ -141,14 +180,17 @@ Every new run receives a unique directory:
 └── RISE_TVB379_results_<mode>.zip
 ```
 
-The manifest records the resolved configuration, exact Python and dependency
-versions, source hashes, and a fingerprint of the experiment code. Status and
-completion files are written atomically, with completion recorded last.
+The manifest records the resolved configuration, initial exact environment,
+source hashes, and a fingerprint of the experiment code. Each new or resumed
+attempt also gets a separate environment record under `attempts/`, including
+its host, CPU availability, and worker settings. Status and completion files
+are written atomically, with completion recorded last.
 
 The workflow checkpoints after bounded units of work, including calibration
-couplings, condition/seed grid blocks, the integration-step check, sensitivity
-blocks, and individual spatial shuffles. After an interruption, explicitly
-resume the incomplete run:
+couplings, condition/seed grid blocks, integration-step convergence blocks,
+sensitivity blocks, and individual spatial shuffles. The parent process writes
+each completed block atomically after receiving it from a worker. After an
+interruption, explicitly resume the incomplete run:
 
 ```bash
 python main.py --resume /path/to/runs/20260728T180000Z_final_ab12cd34
@@ -163,8 +205,8 @@ python main.py --resume /path/to/runs/20260728T180000Z_final_ab12cd34
 - a different Python version; or
 - different dependency versions.
 
-Only a fully written checkpoint is accepted, so a partially written work unit
-is rerun while earlier completed units remain reusable.
+Only a fully written checkpoint is accepted. An in-flight or partially written
+work unit is rerun, while every earlier completed unit remains reusable.
 
 ## Workflow
 
@@ -179,9 +221,26 @@ The stages run in this order:
 7. Within-anatomical-block spatial shuffles
 8. Figures, tables, metadata, and final ZIP export
 
-The convergence gate is deliberately early. It stops the run if either target
-transfer differs by 5% or more, avoiding hours of downstream computation from a
-numerically unacceptable main integration step.
+The convergence gate is deliberately early. It compares the baseline and high
+AD-like endpoints at both 2 Hz and 5 Hz for the music and speech proxy
+networks. This produces eight comparison rows. Each row reports transfer at
+1.0 ms and 0.5 ms, their relative difference, median target-fit R² at both
+steps, and the absolute R² difference as a signal-quality diagnostic. The run
+stops if any transfer differs by 5% or more, avoiding hours of downstream
+computation from a numerically unacceptable main integration step.
+
+**Observed validation result (2026-07-28):** with the pinned Python 3.12
+environment, a real smoke run stopped at this gate. The high-endpoint 5 Hz
+speech comparison had a relative transfer difference of `0.0509171171`
+(`5.0917%`), just above the prespecified limit. An independent single-process
+repeat reproduced the 0.5 ms transfer (`0.0007979828041`), confirming that the
+failure was not caused by parallel scheduling. The median target-fit R² was
+`0.0110693` at 1.0 ms and `0.0156564` at 0.5 ms (absolute difference
+`0.00458705`), so the low signal-quality diagnostic should be considered
+alongside the transfer difference. Pilot and final modes use the same seed-11
+endpoint check and are therefore expected to stop at the same gate on a
+numerically comparable environment. Treat this as a convergence finding, not
+as a reason to silently bypass or relax the threshold.
 
 Matplotlib uses a noninteractive backend. Figures are written to disk rather
 than displayed, so the project can run in a terminal or headless environment.
@@ -287,9 +346,11 @@ Important limitations include:
 - Numerical seeds, control sets, and shuffle percentiles are simulation
   diagnostics, not human subjects or clinical p-values.
 
-The unchanged source notebook is preserved at
-`notebooks/RISE_TVB379_Complete_Experiment.ipynb` for auditability. The Python
-project, not the notebook, is the supported command-line runner.
+The source notebook is retained at
+`notebooks/RISE_TVB379_Complete_Experiment.ipynb` for auditability and has been
+intentionally updated so its required integration-step convergence check
+matches the Python runner. The Python project remains the supported
+command-line runner.
 
 ## Development checks
 
@@ -302,9 +363,10 @@ python -m pytest
 ```
 
 The test suite uses lightweight deterministic substitutes where possible.
-A real `smoke` experiment remains a substantial integration check; the
-approximately 8.5-hour `final` workload is not intended to run as part of the
-normal test suite.
+A real `smoke` run remains a substantial gate-reaching integration diagnostic.
+The planned 422-call `final` workload is not intended to run as part of the
+normal test suite; its actual elapsed time depends on available CPUs, memory
+bandwidth, host load, and whether the convergence gate passes.
 
 ## Primary references
 

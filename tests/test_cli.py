@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import main
+from rise_tvb379 import parallel
 
 
 def test_plain_invocation_has_final_defaults() -> None:
@@ -53,3 +55,58 @@ def test_help_does_not_run_dependency_preflight(capsys) -> None:
         main.parse_args(["--help"])
     assert raised.value.code == 0
     assert "100 spatial shuffles" in capsys.readouterr().out
+
+
+def test_aggregate_tvb_time_includes_calibration_and_manifest() -> None:
+    calibration = pd.DataFrame({"wall_seconds": [2.0, 3.0]})
+    manifest = pd.DataFrame({"wall_seconds": [5.0, 7.0]})
+
+    assert main._aggregate_tvb_wall_seconds(calibration, manifest) == 17.0
+
+
+def test_main_propagates_command_start_and_execution_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    execution = {
+        "multiprocessing_start_method": "spawn",
+        "available_cpu_count": 8,
+        "worker_count": 8,
+        "native_threads_per_worker": 1,
+    }
+    monkeypatch.setattr(main.time, "perf_counter", lambda: 123.5)
+    monkeypatch.setattr(
+        main,
+        "_preflight_runtime",
+        lambda: {"python_version": "3.12.0"},
+    )
+    monkeypatch.setattr(
+        parallel,
+        "configure_native_thread_limits",
+        lambda threads: {},
+    )
+    monkeypatch.setattr(
+        parallel,
+        "execution_details",
+        lambda: execution,
+    )
+
+    def fake_run_new(
+        args,
+        environment,
+        *,
+        command_started,
+    ) -> int:
+        captured["args"] = args
+        captured["environment"] = environment
+        captured["command_started"] = command_started
+        return 0
+
+    monkeypatch.setattr(main, "_run_new", fake_run_new)
+
+    assert main.main(["--mode", "smoke"]) == 0
+    assert captured["command_started"] == 123.5
+    assert captured["environment"] == {
+        "python_version": "3.12.0",
+        "execution": execution,
+    }

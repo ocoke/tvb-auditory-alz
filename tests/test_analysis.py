@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import product
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,6 +9,11 @@ import pytest
 from rise_tvb379.analysis import (
     build_matched_control_sets,
     check_integration_step,
+)
+from rise_tvb379.config import (
+    DT_CHECK_PROBES,
+    DT_CHECK_SEVERITIES,
+    SEVERITY_LABELS,
 )
 
 
@@ -61,40 +68,180 @@ def test_matched_sets_are_deterministic_bilateral_and_disjoint() -> None:
         assert sum(index < 180 for index in speech_control) == 2
 
 
-def test_integration_step_gate_passes_and_fails() -> None:
-    main = pd.DataFrame(
-        [
+DT_KEYS = list(
+    product(
+        DT_CHECK_SEVERITIES,
+        DT_CHECK_PROBES,
+        ("music", "speech"),
+    )
+)
+
+
+def integration_step_frames() -> tuple[pd.DataFrame, pd.DataFrame]:
+    main_rows = []
+    reference_rows = []
+    for index, (severity, probe, network) in enumerate(DT_KEYS, start=1):
+        reference_transfer = float(index)
+        reference_fit = 0.70 + index / 100.0
+        direction = 1.0 if index % 2 else -1.0
+        main_rows.append(
             {
                 "seed": 11,
-                "severity": 0.0,
-                "probe": "2Hz",
-                "network": "music",
-                "transfer": 1.0,
-            },
+                "severity": severity,
+                "probe": probe,
+                "network": network,
+                "transfer": reference_transfer * (1.0 + direction * 0.01),
+                "median_target_fit_r_squared": (
+                    reference_fit + direction * 0.02
+                ),
+            }
+        )
+        reference_rows.append(
             {
-                "seed": 11,
-                "severity": 0.0,
-                "probe": "2Hz",
-                "network": "speech",
-                "transfer": 2.0,
-            },
-        ]
+                "severity": severity,
+                "probe": probe,
+                "network": network,
+                "transfer": reference_transfer,
+                "median_target_fit_r_squared": reference_fit,
+            }
+        )
+    return (
+        pd.DataFrame(main_rows).sample(frac=1.0, random_state=11),
+        pd.DataFrame(reference_rows).sample(frac=1.0, random_state=12),
     )
-    reference = pd.DataFrame(
-        [
-            {"network": "music", "transfer": 1.01},
-            {"network": "speech", "transfer": 2.01},
-        ]
-    )
+
+
+def test_integration_step_gate_checks_every_endpoint_probe_and_network() -> None:
+    main, reference = integration_step_frames()
+    other_seed = main.copy()
+    other_seed["seed"] = 23
+    other_seed["transfer"] = -1.0
+    main = pd.concat([main, other_seed], ignore_index=True)
+
     result = check_integration_step(
         main_network_df=main,
         reference_network_df=reference,
         main_seed=11,
     )
-    assert (result["relative_difference"] < 0.05).all()
 
-    reference.loc[reference["network"] == "music", "transfer"] = 2.0
+    assert list(result.columns) == [
+        "severity",
+        "probe",
+        "network",
+        "transfer_dt_1.0ms",
+        "median_target_fit_r_squared_dt_1.0ms",
+        "transfer_dt_0.5ms",
+        "median_target_fit_r_squared_dt_0.5ms",
+        "condition",
+        "relative_difference",
+        "fit_r_squared_difference",
+    ]
+    assert list(
+        result[["severity", "probe", "network"]].itertuples(
+            index=False, name=None
+        )
+    ) == sorted(DT_KEYS)
+    assert result["condition"].tolist() == [
+        SEVERITY_LABELS[severity] for severity, _, _ in sorted(DT_KEYS)
+    ]
+    np.testing.assert_allclose(result["relative_difference"], 0.01)
+    np.testing.assert_allclose(result["fit_r_squared_difference"], 0.02)
+
+
+def test_integration_step_gate_fails_at_exact_threshold() -> None:
+    main, reference = integration_step_frames()
+    main_target = (
+        (main["severity"] == 1.0)
+        & (main["probe"] == "5Hz")
+        & (main["network"] == "speech")
+    )
+    reference_target = (
+        (reference["severity"] == 1.0)
+        & (reference["probe"] == "5Hz")
+        & (reference["network"] == "speech")
+    )
+    reference.loc[reference_target, "transfer"] = 20.0
+    main.loc[main_target, "transfer"] = 21.0
+
     with pytest.raises(RuntimeError, match="convergence"):
+        check_integration_step(
+            main_network_df=main,
+            reference_network_df=reference,
+            main_seed=11,
+        )
+
+
+@pytest.mark.parametrize("frame_name", ["main", "reference"])
+def test_integration_step_gate_rejects_missing_coverage(
+    frame_name: str,
+) -> None:
+    main, reference = integration_step_frames()
+    if frame_name == "main":
+        main = main[
+            ~(
+                (main["severity"] == 1.0)
+                & (main["probe"] == "5Hz")
+                & (main["network"] == "speech")
+            )
+        ]
+    else:
+        reference = reference[
+            ~(
+                (reference["severity"] == 1.0)
+                & (reference["probe"] == "5Hz")
+                & (reference["network"] == "speech")
+            )
+        ]
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"{frame_name.title()}.*missing required coverage keys",
+    ):
+        check_integration_step(
+            main_network_df=main,
+            reference_network_df=reference,
+            main_seed=11,
+        )
+
+
+@pytest.mark.parametrize("frame_name", ["main", "reference"])
+def test_integration_step_gate_rejects_duplicate_coverage(
+    frame_name: str,
+) -> None:
+    main, reference = integration_step_frames()
+    if frame_name == "main":
+        main = pd.concat([main, main.iloc[[0]]], ignore_index=True)
+    else:
+        reference = pd.concat(
+            [reference, reference.iloc[[0]]],
+            ignore_index=True,
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"{frame_name.title()}.*duplicate coverage keys",
+    ):
+        check_integration_step(
+            main_network_df=main,
+            reference_network_df=reference,
+            main_seed=11,
+        )
+
+
+@pytest.mark.parametrize("frame_name", ["main", "reference"])
+def test_integration_step_gate_reports_missing_columns(
+    frame_name: str,
+) -> None:
+    main, reference = integration_step_frames()
+    if frame_name == "main":
+        main = main.drop(columns="median_target_fit_r_squared")
+    else:
+        reference = reference.drop(columns="median_target_fit_r_squared")
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"{frame_name.title()}.*missing required columns",
+    ):
         check_integration_step(
             main_network_df=main,
             reference_network_df=reference,

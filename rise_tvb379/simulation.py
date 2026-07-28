@@ -6,22 +6,13 @@ import gc
 import logging
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from tvb.simulator.lab import (
-    connectivity,
-    coupling,
-    equations,
-    integrators,
-    models,
-    monitors,
-    patterns,
-    simulator,
-)
 
-from .metrics import b_signature, extract_node_response
+from .metrics import b_signature, extract_node_response, pulse_rms
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,10 +51,70 @@ class BlockResult:
     manifest: pd.DataFrame
 
 
-def fresh_connectivity(context: SimulationContext) -> connectivity.Connectivity:
+@dataclass(frozen=True)
+class _TVBComponents:
+    """Lazily imported TVB modules.
+
+    TVB performs filesystem and logging setup while importing. Keeping that
+    import out of module scope lets spawned workers select their private
+    runtime directories first.
+    """
+
+    connectivity: Any
+    coupling: Any
+    equations: Any
+    integrators: Any
+    models: Any
+    monitors: Any
+    patterns: Any
+    simulator: Any
+
+
+@lru_cache(maxsize=1)
+def _load_tvb_components() -> _TVBComponents:
+    root_logger = logging.getLogger()
+    existing_handlers = tuple(root_logger.handlers)
+    existing_level = root_logger.level
+
+    from tvb.simulator.lab import (
+        connectivity,
+        coupling,
+        equations,
+        integrators,
+        models,
+        monitors,
+        patterns,
+        simulator,
+    )
+
+    # TVB may configure the root logger during import. Restore the caller's
+    # handlers; spawned workers replace them with a multiprocessing queue
+    # immediately after this import.
+    root_logger.handlers[:] = existing_handlers
+    root_logger.setLevel(existing_level)
+    return _TVBComponents(
+        connectivity=connectivity,
+        coupling=coupling,
+        equations=equations,
+        integrators=integrators,
+        models=models,
+        monitors=monitors,
+        patterns=patterns,
+        simulator=simulator,
+    )
+
+
+def initialize_tvb_runtime() -> None:
+    """Import and initialize TVB after runtime directories are configured."""
+
+    _load_tvb_components()
+
+
+def fresh_connectivity(context: SimulationContext) -> Any:
     """Build a new zero-delay TVB connectivity object."""
 
-    return connectivity.Connectivity(
+    tvb = _load_tvb_components()
+    return tvb.connectivity.Connectivity(
         weights=context.weights.copy(),
         tract_lengths=np.zeros_like(context.weights),
         centres=np.zeros((context.n_regions, 3), dtype=float),
@@ -72,11 +123,12 @@ def fresh_connectivity(context: SimulationContext) -> connectivity.Connectivity:
     )
 
 
-def build_model(b_values: np.ndarray) -> models.JansenRit:
+def build_model(b_values: np.ndarray) -> Any:
     """Create the Stefanovski-style regional Jansen-Rit model."""
 
+    tvb = _load_tvb_components()
     background = np.array([0.1085])
-    model = models.JansenRit(
+    model = tvb.models.JansenRit(
         v0=np.array([6.0]),
         mu=background,
         p_min=background,
@@ -91,20 +143,21 @@ def build_model(b_values: np.ndarray) -> models.JansenRit:
 
 def make_temporal_equation(
     probe: str,
-    model: models.JansenRit,
+    model: Any,
     input_peak_per_ms: float,
     *,
     onset_ms: float,
     offset_ms: float,
     pulse_width_ms: float,
-) -> equations.TemporalApplicableEquation:
+) -> Any:
     """Build the pulse or sinusoidal A1 drive used by the notebook."""
 
+    tvb = _load_tvb_components()
     derivative_peak = float(
         model.A[0] * model.a[0] * float(input_peak_per_ms)
     )
     if probe == "pulse":
-        return equations.TemporalApplicableEquation(
+        return tvb.equations.TemporalApplicableEquation(
             equation="where((var >= onset) & (var < onset + width), amp, 0.0)",
             parameters={
                 "onset": float(onset_ms),
@@ -114,7 +167,7 @@ def make_temporal_equation(
         )
 
     frequency_per_ms = {"2Hz": 0.002, "5Hz": 0.005}[probe]
-    return equations.TemporalApplicableEquation(
+    return tvb.equations.TemporalApplicableEquation(
         equation=(
             "where((var >= onset) & (var <= offset), "
             "0.5 * amp * (1.0 + sin(6.283185307179586 * "
@@ -167,6 +220,7 @@ def run_tvb(
     if not np.isclose(ratio, round(ratio)):
         raise ValueError("Monitor period must be an integer multiple of dt.")
 
+    tvb = _load_tvb_components()
     white_matter = fresh_connectivity(context)
     model = build_model(b_values)
     stimulus = None
@@ -175,7 +229,7 @@ def run_tvb(
         regional_weights[context.a1_indices] = 1.0 / np.sqrt(
             len(context.a1_indices)
         )
-        stimulus = patterns.StimuliRegion(
+        stimulus = tvb.patterns.StimuliRegion(
             temporal=make_temporal_equation(
                 probe,
                 model,
@@ -188,14 +242,16 @@ def run_tvb(
             weight=regional_weights,
         )
 
-    experiment = simulator.Simulator(
+    experiment = tvb.simulator.Simulator(
         connectivity=white_matter,
         model=model,
-        coupling=coupling.SigmoidalJansenRit(
+        coupling=tvb.coupling.SigmoidalJansenRit(
             a=np.array([float(global_coupling)])
         ),
-        integrator=integrators.HeunDeterministic(dt=float(dt_ms)),
-        monitors=(monitors.SubSample(period=context.monitor_period_ms),),
+        integrator=tvb.integrators.HeunDeterministic(dt=float(dt_ms)),
+        monitors=(
+            tvb.monitors.SubSample(period=context.monitor_period_ms),
+        ),
         stimulus=stimulus,
         initial_conditions=make_initial_conditions(seed, context.n_regions),
     )
@@ -217,6 +273,95 @@ def run_tvb(
             "TVB activity exceeded the prespecified safety bound of 100."
         )
     return time_ms, psp, wall_seconds
+
+
+def run_calibration_block(
+    context: SimulationContext,
+    *,
+    baseline_b: np.ndarray,
+    global_coupling: float,
+    input_peak_per_ms: float,
+    seed: int,
+    dt_ms: float,
+    simulation_ms: float,
+) -> pd.DataFrame:
+    """Run one coupling candidate's control/pulse calibration pair."""
+
+    LOGGER.info(
+        "calibration: G=%g seed=%d control START",
+        global_coupling,
+        int(seed),
+    )
+    control_time, control_psp, control_wall = run_tvb(
+        context,
+        b_values=baseline_b,
+        probe=None,
+        global_coupling=global_coupling,
+        input_peak_per_ms=input_peak_per_ms,
+        seed=seed,
+        dt_ms=dt_ms,
+        simulation_ms=simulation_ms,
+    )
+    LOGGER.info(
+        "calibration: G=%g seed=%d control DONE in %.1fs",
+        global_coupling,
+        int(seed),
+        control_wall,
+    )
+    LOGGER.info(
+        "calibration: G=%g seed=%d probe=pulse START",
+        global_coupling,
+        int(seed),
+    )
+    pulse_time, pulse_psp, pulse_wall = run_tvb(
+        context,
+        b_values=baseline_b,
+        probe="pulse",
+        global_coupling=global_coupling,
+        input_peak_per_ms=input_peak_per_ms,
+        seed=seed,
+        dt_ms=dt_ms,
+        simulation_ms=simulation_ms,
+    )
+    LOGGER.info(
+        "calibration: G=%g seed=%d probe=pulse DONE in %.1fs",
+        global_coupling,
+        int(seed),
+        pulse_wall,
+    )
+    if not np.allclose(control_time, pulse_time):
+        raise RuntimeError("Calibration time axes differ.")
+
+    response, _ = pulse_rms(
+        pulse_time,
+        pulse_psp - control_psp,
+        onset_ms=context.stimulus_onset_ms,
+        analysis_end_ms=context.pulse_analysis_end_ms,
+        n_regions=context.n_regions,
+    )
+    a1 = float(np.mean(response[context.a1_indices]))
+    music = float(np.mean(response[context.music_indices]))
+    speech = float(np.mean(response[context.speech_indices]))
+    frame = pd.DataFrame(
+        [
+            {
+                "global_coupling": float(global_coupling),
+                "a1_rms": a1,
+                "music_transfer": music / a1,
+                "speech_transfer": speech / a1,
+                "balanced_target_score": float(
+                    np.sqrt((music / a1) * (speech / a1))
+                ),
+                "max_abs_evoked": float(
+                    np.max(np.abs(pulse_psp - control_psp))
+                ),
+                "wall_seconds": float(control_wall + pulse_wall),
+            }
+        ]
+    )
+    del control_psp, pulse_psp
+    gc.collect()
+    return frame
 
 
 def run_condition_seed_block(
@@ -247,7 +392,10 @@ def run_condition_seed_block(
     manifest_rows: list[dict[str, Any]] = []
 
     LOGGER.info(
-        "%s: condition=%s seed=%s control", scope, variant, int(seed)
+        "%s: condition=%s seed=%s control START",
+        scope,
+        variant,
+        int(seed),
     )
     control_time, control_psp, control_wall = run_tvb(
         context,
@@ -258,6 +406,13 @@ def run_condition_seed_block(
         seed=seed,
         dt_ms=dt_ms,
         simulation_ms=simulation_ms,
+    )
+    LOGGER.info(
+        "%s: condition=%s seed=%s control DONE in %.1fs",
+        scope,
+        variant,
+        int(seed),
+        control_wall,
     )
     manifest_rows.append(
         {
@@ -282,7 +437,7 @@ def run_condition_seed_block(
     try:
         for probe in probes:
             LOGGER.info(
-                "%s: condition=%s seed=%s probe=%s",
+                "%s: condition=%s seed=%s probe=%s START",
                 scope,
                 variant,
                 int(seed),
@@ -386,6 +541,14 @@ def run_condition_seed_block(
                     ),
                     "max_abs_evoked": float(np.max(np.abs(evoked))),
                 }
+            )
+            LOGGER.info(
+                "%s: condition=%s seed=%s probe=%s DONE in %.1fs",
+                scope,
+                variant,
+                int(seed),
+                probe,
+                stimulated_wall,
             )
             del stimulated_psp, evoked
             gc.collect()

@@ -59,15 +59,15 @@ def test_final_workload_counts_include_calibration() -> None:
         "local_dynamics_counterfactual": 20,
         "sensitivity": 24,
         "spatial_shuffle": 300,
-        "integration_step_check": 2,
-        "manifest": 406,
-        "total": 418,
+        "integration_step_check": 6,
+        "manifest": 410,
+        "total": 422,
     }
 
 
 @pytest.mark.parametrize(
     ("mode", "manifest", "total"),
-    [("smoke", 23, 25), ("pilot", 52, 58), ("final", 406, 418)],
+    [("smoke", 27, 29), ("pilot", 56, 62), ("final", 410, 422)],
 )
 def test_all_mode_workload_totals(
     mode: str, manifest: int, total: int
@@ -100,10 +100,11 @@ def test_config_serialization_is_canonical_and_digestible() -> None:
     assert payload["mode"] == "final"
     assert payload["mode_config"]["spatial_shuffles"] == 100
     assert payload["experiment"]["n_regions"] == 379
+    assert payload["experiment"]["dt_check_severities"] == [0.0, 1.0]
+    assert payload["experiment"]["dt_check_probes"] == ["2Hz", "5Hz"]
     assert config_to_json(DEFAULT_CONFIG) == config_to_json(DEFAULT_CONFIG)
     assert config_digest_input(DEFAULT_CONFIG) == config_to_json(
         DEFAULT_CONFIG
     ).encode("utf-8")
     assert len(config_digest(DEFAULT_CONFIG)) == 64
     assert config_digest(DEFAULT_CONFIG) == config_digest(DEFAULT_CONFIG)
-

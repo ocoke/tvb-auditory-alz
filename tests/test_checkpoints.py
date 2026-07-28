@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from itertools import product
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
+from rise_tvb379.analysis import check_integration_step
 from rise_tvb379.checkpoints import (
     COMPLETE_MARKER_NAME,
     atomic_write_json,
@@ -27,6 +30,7 @@ from rise_tvb379.runtime import (
     run_status_lifecycle,
     update_run_status,
     validate_resume,
+    write_attempt_environment,
     write_run_manifest,
 )
 
@@ -352,6 +356,9 @@ def test_manifest_records_exact_paths_and_compatible_resume(tmp_path: Path) -> N
     )
     assert manifest["paths"]["status"] == str((run_dir / "run_status.json").resolve())
     assert manifest["paths"]["log"] == str((run_dir / "run.log").resolve())
+    assert manifest["paths"]["attempt_environment_directory"] == str(
+        (run_dir / "attempts").resolve()
+    )
     assert manifest["paths"]["input_files"]["connectivity"] == str(input_path.resolve())
     assert set(manifest["fingerprints"]) == {
         "code",
@@ -359,6 +366,149 @@ def test_manifest_records_exact_paths_and_compatible_resume(tmp_path: Path) -> N
         "environment",
         "inputs",
     }
+
+
+def test_manifest_persists_parallel_execution_provenance(
+    tmp_path: Path,
+) -> None:
+    project, input_path = make_project(tmp_path)
+    run_dir = create_run_directory(
+        tmp_path / "runs",
+        "smoke",
+        "abcdef012345",
+    )
+    environment = fixed_environment()
+    environment["execution"] = {
+        "multiprocessing_start_method": "spawn",
+        "available_cpu_count": 8,
+        "worker_count": 8,
+        "native_threads_per_worker": 1,
+        "native_thread_environment": {
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+        },
+    }
+
+    manifest = write_run_manifest(
+        run_dir,
+        mode="smoke",
+        resolved_config={"mode": "smoke"},
+        project_root=project,
+        inputs={"connectivity": input_path},
+        environment=environment,
+    )
+    saved_environment = json.loads(
+        (run_dir / "environment.json").read_text(encoding="utf-8")
+    )
+
+    assert saved_environment["execution"] == environment["execution"]
+    assert manifest["environment"]["execution"] == environment["execution"]
+    assert (
+        manifest["fingerprints"]["environment"]
+        == fingerprint_environment(saved_environment)
+    )
+    initial_attempt = write_attempt_environment(
+        run_dir,
+        attempt=1,
+        environment=environment,
+        recorded_at=datetime(2026, 7, 28, 18, 0, tzinfo=timezone.utc),
+    )
+    resumed_environment = dict(environment)
+    resumed_environment["platform"] = "different-compatible-host"
+    resumed_environment["execution"] = {
+        **environment["execution"],  # type: ignore[arg-type]
+        "available_cpu_count": 4,
+        "worker_count": 4,
+    }
+    resumed_attempt = write_attempt_environment(
+        run_dir,
+        attempt=2,
+        environment=resumed_environment,
+        recorded_at=datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc),
+    )
+    assert json.loads(initial_attempt.read_text(encoding="utf-8"))[
+        "environment"
+    ]["execution"]["worker_count"] == 8
+    assert json.loads(resumed_attempt.read_text(encoding="utf-8"))[
+        "environment"
+    ]["execution"]["worker_count"] == 4
+    with pytest.raises(ValueError, match="positive integer"):
+        write_attempt_environment(
+            run_dir,
+            attempt=0,
+            environment=environment,
+        )
+
+
+def test_real_convergence_failure_is_recorded_and_resume_compatible(
+    tmp_path: Path,
+) -> None:
+    run_dir, project, _, environment = make_resumable_run(tmp_path)
+    checkpoint_root = run_dir / "checkpoints"
+    write_completed_block(
+        checkpoint_root,
+        "dt_reference",
+        "severity_1.0_seed_11",
+        {"network": TinyFrame("severity,probe,network\n1.0,5Hz,speech\n")},
+        {"dt_ms": 0.5},
+    )
+    main_rows: list[dict[str, object]] = []
+    reference_rows: list[dict[str, object]] = []
+    for severity, probe, network in product(
+        (0.0, 1.0),
+        ("2Hz", "5Hz"),
+        ("music", "speech"),
+    ):
+        reference_transfer = 1.0
+        main_transfer = 0.99
+        if (severity, probe, network) == (1.0, "5Hz", "speech"):
+            main_transfer = 1.05
+        main_rows.append(
+            {
+                "seed": 11,
+                "severity": severity,
+                "probe": probe,
+                "network": network,
+                "transfer": main_transfer,
+                "median_target_fit_r_squared": 0.8,
+            }
+        )
+        reference_rows.append(
+            {
+                "severity": severity,
+                "probe": probe,
+                "network": network,
+                "transfer": reference_transfer,
+                "median_target_fit_r_squared": 0.79,
+            }
+        )
+
+    with pytest.raises(RuntimeError, match="5% convergence check"):
+        with run_status_lifecycle(run_dir, mode="smoke"):
+            check_integration_step(
+                main_network_df=pd.DataFrame(main_rows),
+                reference_network_df=pd.DataFrame(reference_rows),
+                main_seed=11,
+            )
+
+    failed = load_run_status(run_dir)
+    assert failed["status"] == "failed"
+    assert failed["error"]["type"] == "RuntimeError"
+    assert failed["exit_time"] is not None
+    assert not list(run_dir.glob("RISE_TVB379_results_*.zip"))
+    saved = read_completed_block(
+        checkpoint_root,
+        "dt_reference",
+        "severity_1.0_seed_11",
+        dataframe_reader=lambda path: path.read_text(encoding="utf-8"),
+    )
+    assert "speech" in saved.frames["network"]
+    compatible_manifest = validate_resume(
+        run_dir,
+        project_root=project,
+        environment=environment,
+    )
+    assert compatible_manifest["mode"] == "smoke"
 
 
 @pytest.mark.parametrize(

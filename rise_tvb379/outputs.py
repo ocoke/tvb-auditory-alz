@@ -121,6 +121,7 @@ def build_result_archive(run_dir: Path, mode: str) -> Path:
     include_roots = [
         run_dir / "results",
         run_dir / "inputs",
+        run_dir / "attempts",
     ]
     include_files = [
         run_dir / "resolved_config.json",

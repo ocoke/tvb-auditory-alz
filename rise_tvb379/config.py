@@ -26,6 +26,8 @@ PULSE_ANALYSIS_END_MS = 3500.0
 
 PROBES = ("pulse", "2Hz", "5Hz")
 PERIODIC_PROBES = ("2Hz", "5Hz")
+DT_CHECK_SEVERITIES = (0.0, 1.0)
+DT_CHECK_PROBES = PERIODIC_PROBES
 SEVERITY_LABELS = MappingProxyType(
     {
         0.0: "Baseline",
@@ -150,6 +152,8 @@ class ExperimentConfig:
     pulse_analysis_end_ms: float = PULSE_ANALYSIS_END_MS
     probes: tuple[str, ...] = PROBES
     periodic_probes: tuple[str, ...] = PERIODIC_PROBES
+    dt_check_severities: tuple[float, ...] = DT_CHECK_SEVERITIES
+    dt_check_probes: tuple[str, ...] = DT_CHECK_PROBES
     download_results_at_end: bool = False
 
     def __post_init__(self) -> None:
@@ -171,6 +175,14 @@ class ExperimentConfig:
             raise ValueError("Periodic analysis must start before simulation end.")
         if not set(self.periodic_probes).issubset(self.probes):
             raise ValueError("Periodic probes must be included in probes.")
+        if not set(self.dt_check_severities).issubset(self.severities):
+            raise ValueError(
+                "Integration-step severities must be included in the mode."
+            )
+        if not set(self.dt_check_probes).issubset(self.periodic_probes):
+            raise ValueError(
+                "Integration-step probes must be periodic probes."
+            )
 
     @property
     def seeds(self) -> tuple[int, ...]:
@@ -261,6 +273,16 @@ def workload_counts(config: ExperimentConfig | ModeConfig) -> WorkloadCounts:
         if isinstance(config, ExperimentConfig)
         else PERIODIC_PROBES
     )
+    dt_check_severities = (
+        config.dt_check_severities
+        if isinstance(config, ExperimentConfig)
+        else DT_CHECK_SEVERITIES
+    )
+    dt_check_probes = (
+        config.dt_check_probes
+        if isinstance(config, ExperimentConfig)
+        else DT_CHECK_PROBES
+    )
 
     calibration = len(mode.calibration_couplings) * 2
     main = len(mode.severities) * len(mode.seeds) * (1 + len(probes))
@@ -271,7 +293,9 @@ def workload_counts(config: ExperimentConfig | ModeConfig) -> WorkloadCounts:
         * (1 + len(periodic_probes))
     )
     spatial_shuffle = mode.spatial_shuffles * (1 + len(periodic_probes))
-    integration_step_check = 2
+    integration_step_check = len(dt_check_severities) * (
+        1 + len(dt_check_probes)
+    )
     return WorkloadCounts(
         calibration=calibration,
         main=main,
@@ -319,6 +343,8 @@ def config_to_dict(config: ExperimentConfig) -> dict[str, Any]:
             "pulse_analysis_end_ms": config.pulse_analysis_end_ms,
             "probes": list(config.probes),
             "periodic_probes": list(config.periodic_probes),
+            "dt_check_severities": list(config.dt_check_severities),
+            "dt_check_probes": list(config.dt_check_probes),
             "severity_labels": [
                 {"severity": severity, "label": label}
                 for severity, label in SEVERITY_LABELS.items()
@@ -361,4 +387,3 @@ def config_digest(config: ExperimentConfig) -> str:
 
 
 DEFAULT_CONFIG = get_experiment_config("final")
-
