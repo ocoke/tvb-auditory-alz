@@ -14,7 +14,8 @@ import numpy as np
 import pandas as pd
 
 from .analysis import (
-    build_matched_control_sets,
+    build_matched_pair_sets,
+    build_matching_features,
     build_sensitivity_tables,
     build_shuffle_tables,
     check_integration_step,
@@ -33,9 +34,15 @@ from .data import (
     EDUCASE_COMMIT,
     PIPELINE_COMMIT,
     ExperimentData,
+    ROI_GROUPS,
 )
 from .metrics import make_contrasts, normalize_to_baseline
-from .parallel import ParallelRunner, WorkerJob, WorkerOutcome
+from .parallel import (
+    ParallelRunner,
+    SerialRunner,
+    WorkerJob,
+    WorkerOutcome,
+)
 from .simulation import (
     BlockResult,
     SimulationContext,
@@ -51,14 +58,19 @@ class PipelineProducts:
     tables: dict[str, pd.DataFrame]
     main_normalized_df: pd.DataFrame
     primary_endpoint_df: pd.DataFrame
+    secondary_endpoint_df: pd.DataFrame
     counterfactual_comparison_df: pd.DataFrame
+    memory_counterfactual_comparison_df: pd.DataFrame
     matched_null_df: pd.DataFrame
+    memory_matched_null_df: pd.DataFrame
     sensitivity_endpoint_df: pd.DataFrame
     shuffle_contrast_df: pd.DataFrame
     observed_first_seed_df: pd.DataFrame
+    memory_observed_first_seed_df: pd.DataFrame
     calibration_df: pd.DataFrame
     target_feature_df: pd.DataFrame
     shuffle_summary_df: pd.DataFrame
+    memory_shuffle_summary_df: pd.DataFrame
 
 
 def make_simulation_context(
@@ -71,8 +83,10 @@ def make_simulation_context(
         weights=data.weights,
         labels=data.labels,
         a1_indices=data.rois.a1_indices,
-        music_indices=data.rois.music_indices,
-        speech_indices=data.rois.speech_indices,
+        network_indices={
+            name: indices
+            for name, indices in data.rois.network_indices.items()
+        },
         n_regions=config.n_regions,
         monitor_period_ms=config.monitor_period_ms,
         stimulus_onset_ms=config.stimulus_onset_ms,
@@ -238,7 +252,7 @@ def _checkpoint_frames(plan: _BlockPlan, result: Any) -> dict[str, pd.DataFrame]
 
 def _execute_plans(
     checkpoint_root: Path,
-    runner: ParallelRunner,
+    runner: ParallelRunner | SerialRunner,
     progress: _ProgressReporter,
     *,
     plans: list[_BlockPlan],
@@ -295,6 +309,18 @@ def _execute_plans(
                 f"Worker kind mismatch for {plan.stage}/{plan.block_key}."
             )
         result = outcome.result
+        if isinstance(result, BlockResult):
+            result.manifest = result.manifest.assign(
+                job_ordinal=plan.ordinal,
+                worker_pid=outcome.worker_pid,
+            )
+        elif plan.kind == "calibration" and isinstance(
+            result, pd.DataFrame
+        ):
+            result = result.assign(
+                job_ordinal=plan.ordinal,
+                worker_pid=outcome.worker_pid,
+            )
         write_completed_block(
             checkpoint_root,
             plan.stage,
@@ -334,7 +360,7 @@ def _concat_blocks(
 def _run_grid(
     checkpoint_root: Path,
     context: SimulationContext,
-    runner: ParallelRunner,
+    runner: ParallelRunner | SerialRunner,
     progress: _ProgressReporter,
     *,
     stage_number: int,
@@ -434,7 +460,7 @@ def _run_calibration(
     data: ExperimentData,
     context: SimulationContext,
     checkpoint_root: Path,
-    runner: ParallelRunner,
+    runner: ParallelRunner | SerialRunner,
     progress: _ProgressReporter,
 ) -> pd.DataFrame:
     calibration_simulation_ms = 4000.0
@@ -513,7 +539,7 @@ def run_pipeline(
     *,
     source_manifest_df: pd.DataFrame,
     run_dir: Path,
-    worker_count: int | None = None,
+    worker_count: int = 1,
 ) -> PipelineProducts:
     """Execute or resume every scientific stage and assemble final tables."""
 
@@ -525,11 +551,16 @@ def run_pipeline(
         total_calls=counts.total,
         total_work_units=_total_work_units(config),
     )
-    with ParallelRunner(
-        context,
-        run_dir,
-        worker_count=worker_count,
-    ) as runner:
+    runner_context = (
+        SerialRunner(context, run_dir)
+        if worker_count == 1
+        else ParallelRunner(
+            context,
+            run_dir,
+            worker_count=worker_count,
+        )
+    )
+    with runner_context as runner:
         products = _run_pipeline_stages(
             config,
             data,
@@ -555,7 +586,7 @@ def _run_pipeline_stages(
     source_manifest_df: pd.DataFrame,
     checkpoint_root: Path,
     context: SimulationContext,
-    runner: ParallelRunner,
+    runner: ParallelRunner | SerialRunner,
     progress: _ProgressReporter,
 ) -> PipelineProducts:
     """Run all stages using one persistent worker pool."""
@@ -602,6 +633,23 @@ def _run_pipeline_stages(
         main_contrast_df,
         periodic_probes=config.periodic_probes,
     )
+    secondary_endpoint_df = primary_endpoint_df.copy()
+    secondary_main_contrast_df = main_contrast_df[
+        [
+            "scope",
+            "variant",
+            "condition",
+            "severity",
+            "seed",
+            "probe",
+            "global_coupling",
+            "input_peak_per_ms",
+            "dt_ms",
+            "music_semantic_task_associated",
+            "music_episodic_task_associated",
+            "semantic_minus_episodic_log2_change",
+        ]
+    ].copy()
 
     # Fail early, before counterfactuals and robustness stages.
     _, reference_network_df, reference_manifest_df = _run_grid(
@@ -612,13 +660,13 @@ def _run_pipeline_stages(
         stage_number=3,
         stage_name="integration-step convergence",
         stage="dt_reference",
-        scope="dt_reference_0.5ms",
+        scope="dt_reference_0.25ms",
         conditions=[
             {
                 "condition": SEVERITY_LABELS[severity],
                 "severity": severity,
                 "b_values": data.b_by_severity[severity],
-                "variant": f"dt_0.5ms_severity_{severity:.1f}",
+                "variant": f"dt_0.25ms_severity_{severity:.1f}",
             }
             for severity in config.dt_check_severities
         ],
@@ -635,6 +683,9 @@ def _run_pipeline_stages(
         main_seed=config.seeds[0],
         severities=config.dt_check_severities,
         probes=config.dt_check_probes,
+        networks=tuple(data.rois.network_indices),
+        inferential_networks=config.dt_check_networks,
+        threshold=config.dt_relative_tolerance,
     )
     LOGGER.info(
         "Integration-step convergence passed for %d endpoint/probe/network "
@@ -643,9 +694,15 @@ def _run_pipeline_stages(
         100.0 * float(dt_convergence_df["relative_difference"].max()),
     )
 
-    local_fixed_high_b = data.high_b.copy()
-    local_fixed_high_b[data.rois.all_declared_indices] = data.baseline_b[
-        data.rois.all_declared_indices
+    primary_local_fixed_high_b = data.high_b.copy()
+    primary_fixed = data.rois.primary_counterfactual_fixed_indices
+    primary_local_fixed_high_b[primary_fixed] = data.baseline_b[
+        primary_fixed
+    ]
+    memory_local_fixed_high_b = data.high_b.copy()
+    memory_fixed = data.rois.memory_counterfactual_fixed_indices
+    memory_local_fixed_high_b[memory_fixed] = data.baseline_b[
+        memory_fixed
     ]
     (
         local_fixed_node_df,
@@ -663,12 +720,23 @@ def _run_pipeline_stages(
         conditions=[
             {
                 "condition": (
-                    "High AD-like perturbation, declared local dynamics fixed"
+                    "High AD-like perturbation, primary local dynamics fixed"
                 ),
                 "severity": 1.0,
-                "b_values": local_fixed_high_b,
-                "variant": "local_fixed_endpoint",
-            }
+                "b_values": primary_local_fixed_high_b,
+                "variant": "primary_local_fixed_endpoint",
+                "key_prefix": "primary_",
+            },
+            {
+                "condition": (
+                    "High AD-like perturbation, musical-memory proxy "
+                    "local dynamics fixed"
+                ),
+                "severity": 1.0,
+                "b_values": memory_local_fixed_high_b,
+                "variant": "memory_local_fixed_endpoint",
+                "key_prefix": "memory_",
+            },
         ],
         seeds=config.seeds,
         probes=config.probes,
@@ -681,6 +749,7 @@ def _run_pipeline_stages(
         _local_fixed_normalized_df,
         local_fixed_contrast_df,
         counterfactual_comparison_df,
+        memory_counterfactual_comparison_df,
     ) = compare_counterfactual(
         primary_endpoint_df,
         local_fixed_network_df,
@@ -694,22 +763,69 @@ def _run_pipeline_stages(
         "deterministic control sets",
         config.workload.matched_null_sets,
     )
-    target_feature_df, matched_sets_df = build_matched_control_sets(
+    target_groups = {
+        "music": data.rois.music_indices,
+        "speech": data.rois.speech_indices,
+        "semantic_associated": data.rois.semantic_memory_indices,
+        "episodic_associated": data.rois.episodic_memory_indices,
+    }
+    target_feature_df, matching_z = build_matching_features(
         weights=data.weights,
         baseline_b=data.baseline_b,
         high_b=data.high_b,
         labels=data.labels,
         a1_indices=data.rois.a1_indices,
-        music_indices=data.rois.music_indices,
-        speech_indices=data.rois.speech_indices,
+        target_groups=target_groups,
+    )
+    matched_sets_df = build_matched_pair_sets(
+        labels=data.labels,
+        matching_z=matching_z,
         all_declared_indices=data.rois.all_declared_indices,
+        pair_name="music_minus_speech",
+        left_name="music",
+        left_indices=data.rois.music_indices,
+        right_name="speech",
+        right_indices=data.rois.speech_indices,
         n_sets=config.workload.matched_null_sets,
+        random_seed=20260727,
+    )
+    memory_matched_sets_df = build_matched_pair_sets(
+        labels=data.labels,
+        matching_z=matching_z,
+        all_declared_indices=data.rois.all_declared_indices,
+        pair_name="semantic_minus_episodic",
+        left_name="semantic_associated",
+        left_indices=data.rois.semantic_memory_indices,
+        right_name="episodic_associated",
+        right_indices=data.rois.episodic_memory_indices,
+        n_sets=config.workload.matched_null_sets,
+        random_seed=20260728,
     )
     matched_null_df, matched_null_summary_df = score_matched_control_null(
         main_node_df=main_node_df,
         main_network_df=main_network_df,
-        matched_sets_df=matched_sets_df,
-        primary_endpoint_df=primary_endpoint_df,
+        pair_sets_df=matched_sets_df,
+        observed_df=primary_endpoint_df,
+        observed_column="music_minus_speech_log2_change",
+        left_output_column="music_control_log2_change",
+        right_output_column="speech_control_log2_change",
+        null_output_column="null_music_minus_speech",
+        seeds=config.seeds,
+        periodic_probes=config.periodic_probes,
+        n_regions=config.n_regions,
+    )
+    (
+        memory_matched_null_df,
+        memory_matched_null_summary_df,
+    ) = score_matched_control_null(
+        main_node_df=main_node_df,
+        main_network_df=main_network_df,
+        pair_sets_df=memory_matched_sets_df,
+        observed_df=secondary_endpoint_df,
+        observed_column="semantic_minus_episodic_log2_change",
+        left_output_column="semantic_control_log2_change",
+        right_output_column="episodic_control_log2_change",
+        null_output_column="null_semantic_minus_episodic",
         seeds=config.seeds,
         periodic_probes=config.periodic_probes,
         n_regions=config.n_regions,
@@ -823,10 +939,12 @@ def _run_pipeline_stages(
         shuffle_contrast_df,
         observed_first_seed_df,
         shuffle_summary_df,
+        memory_observed_first_seed_df,
+        memory_shuffle_summary_df,
     ) = build_shuffle_tables(
         [shuffle_network_df],
         main_network_df=main_network_df,
-        primary_endpoint_df=primary_endpoint_df,
+        endpoint_df=primary_endpoint_df,
         main_seed=main_seed,
     )
     all_manifest_df = pd.concat(
@@ -840,13 +958,14 @@ def _run_pipeline_stages(
         ignore_index=True,
     )
     LOGGER.info(
-        "Stage 8/8 output assembly: preparing 23 tables, figures, metadata, "
+        "Stage 8/8 output assembly: preparing 31 tables, figures, metadata, "
         "and archive"
     )
     tables = {
         "source_manifest": source_manifest_df,
         "data_quality": data.data_quality_df,
         "roi_definitions": data.roi_definition_df,
+        "music_memory_peak_mapping": data.rois.peak_mapping_df,
         "roi_pathology": data.roi_pathology_df,
         "pathology_summary": data.pathology_summary_df,
         "calibration": calibration_df,
@@ -854,17 +973,24 @@ def _run_pipeline_stages(
         "main_network": main_network_df,
         "main_normalized": main_normalized_df,
         "main_contrasts": main_contrast_df,
+        "main_memory_contrasts": secondary_main_contrast_df,
         "main_stage_summary": main_stage_summary_df,
         "local_fixed_node": local_fixed_node_df,
         "local_fixed_network": local_fixed_network_df,
         "local_fixed_contrasts": local_fixed_contrast_df,
+        "memory_counterfactual": memory_counterfactual_comparison_df,
         "matched_sets": matched_sets_df,
         "matched_null": matched_null_df,
         "matched_null_summary": matched_null_summary_df,
+        "memory_matched_sets": memory_matched_sets_df,
+        "memory_matched_null": memory_matched_null_df,
+        "memory_matched_null_summary": memory_matched_null_summary_df,
         "sensitivity_network": sensitivity_network_df,
         "sensitivity_contrasts": sensitivity_contrast_df,
         "shuffle_network": shuffle_network_df,
         "shuffle_contrasts": shuffle_contrast_df,
+        "shuffle_summary": shuffle_summary_df,
+        "memory_shuffle_summary": memory_shuffle_summary_df,
         "dt_convergence": dt_convergence_df,
         "run_manifest": all_manifest_df,
     }
@@ -872,14 +998,21 @@ def _run_pipeline_stages(
         tables=tables,
         main_normalized_df=main_normalized_df,
         primary_endpoint_df=primary_endpoint_df,
+        secondary_endpoint_df=secondary_endpoint_df,
         counterfactual_comparison_df=counterfactual_comparison_df,
+        memory_counterfactual_comparison_df=(
+            memory_counterfactual_comparison_df
+        ),
         matched_null_df=matched_null_df,
+        memory_matched_null_df=memory_matched_null_df,
         sensitivity_endpoint_df=sensitivity_endpoint_df,
         shuffle_contrast_df=shuffle_contrast_df,
         observed_first_seed_df=observed_first_seed_df,
+        memory_observed_first_seed_df=memory_observed_first_seed_df,
         calibration_df=calibration_df,
         target_feature_df=target_feature_df,
         shuffle_summary_df=shuffle_summary_df,
+        memory_shuffle_summary_df=memory_shuffle_summary_df,
     )
 
 
@@ -928,15 +1061,45 @@ def build_experiment_metadata(
             "spatial_shuffles": config.workload.spatial_shuffles,
         },
         "parcels": {
-            "A1": list(data.rois.a1_labels),
-            "music_proxy": list(data.rois.music_labels),
-            "speech_proxy": list(data.rois.speech_labels),
+            "primary_music_proxy": list(data.rois.music_labels),
+            "primary_speech_proxy": list(data.rois.speech_labels),
+            "secondary_semantic_task_associated_proxy": list(
+                data.rois.semantic_memory_labels
+            ),
+            "secondary_episodic_task_associated_proxy": list(
+                data.rois.episodic_memory_labels
+            ),
+            "secondary_mapping_source": {
+                "paper": (
+                    "Platel et al. 2003, NeuroImage 20:244-256, "
+                    "doi:10.1016/S1053-8119(03)00287-8"
+                ),
+                "coordinate_space": (
+                    "SPM99 coordinates reported by paper"
+                ),
+                "atlas_reference": (
+                    "volumetric HCP-MMP1 reference; parcel labels "
+                    "validated against the 379-entry order"
+                ),
+                "mapping_table": "music_memory_peak_mapping.csv",
+            },
+            "roi_groups": {
+                group_name: list(specification["labels"])
+                for group_name, specification in ROI_GROUPS.items()
+            },
         },
         "primary_metric": (
             "network harmonic amplitude divided by bilateral A1 harmonic "
             "amplitude, then log2-normalized to the same network's baseline"
         ),
         "primary_contrast": "music log2 change minus speech log2 change",
+        "secondary_contrast": (
+            "semantic-task-associated log2 change minus "
+            "episodic-task-associated log2 change"
+        ),
+        "secondary_analysis_status": (
+            "prespecified secondary mechanistic analysis; not a memory task"
+        ),
         "interpretation_limits": [
             (
                 "The public amyloid endpoint is an artificial surrogate, "
@@ -959,8 +1122,33 @@ def build_experiment_metadata(
             "The parcel groups are approximate proxy subnetworks.",
             "The model contains no memory encoding or retrieval mechanism.",
             (
+                "Semantic- and episodic-task-associated parcels are "
+                "operational proxy sets, not proven separate pathways."
+            ),
+            (
+                "The periodic probes contain no familiarity, encoding, "
+                "delay, or recognition manipulation."
+            ),
+            (
+                "Coordinate-to-parcel mapping is approximate because the "
+                "source PET study and HCP-MMP atlas use different "
+                "parcellation and registration frameworks."
+            ),
+            (
                 "Numerical seeds and matched control sets are not human "
                 "subjects."
+            ),
+            (
+                "The HCP-MMP atlas contains PBelt but not separate rostral "
+                "and caudal parabelt parcels."
+            ),
+            (
+                "TA2/STGa are a gross planum-polare proxy, not a voxelwise "
+                "music-selective functional localizer."
+            ),
+            (
+                "6ma/24dd are parcel approximations of the Jacobsen "
+                "musical-memory regions, not a direct surface-overlap mapping."
             ),
         ],
         "provenance": provenance,

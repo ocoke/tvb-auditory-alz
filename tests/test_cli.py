@@ -16,6 +16,7 @@ def test_plain_invocation_has_final_defaults() -> None:
     assert args.output_root is None
     assert args.data_dir is None
     assert args.offline is None
+    assert args.workers == 1
 
 
 def test_new_run_options_parse() -> None:
@@ -28,12 +29,39 @@ def test_new_run_options_parse() -> None:
             "--data-dir",
             "/tmp/data",
             "--offline",
+            "--workers",
+            "auto",
         ]
     )
     assert args.mode == "smoke"
     assert args.output_root == Path("/tmp/runs")
     assert args.data_dir == Path("/tmp/data")
     assert args.offline is True
+    assert args.workers is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("1", 1), ("4", 4), ("auto", None), ("AUTO", None)],
+)
+def test_worker_option_parses(
+    value: str,
+    expected: int | None,
+) -> None:
+    assert main.parse_args(["--workers", value]).workers == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "many"])
+def test_worker_option_rejects_invalid_values(value: str) -> None:
+    with pytest.raises(SystemExit):
+        main.parse_args(["--workers", value])
+
+
+def test_resume_may_change_runtime_worker_count() -> None:
+    args = main.parse_args(
+        ["--resume", "/tmp/run", "--workers", "4"]
+    )
+    assert args.workers == 4
 
 
 @pytest.mark.parametrize(
@@ -69,9 +97,11 @@ def test_main_propagates_command_start_and_execution_provenance(
 ) -> None:
     captured: dict[str, object] = {}
     execution = {
-        "multiprocessing_start_method": "spawn",
+        "execution_mode": "single_process",
+        "parallel_enabled": False,
+        "multiprocessing_start_method": None,
         "available_cpu_count": 8,
-        "worker_count": 8,
+        "worker_count": 1,
         "native_threads_per_worker": 1,
     }
     monkeypatch.setattr(main.time, "perf_counter", lambda: 123.5)
@@ -88,8 +118,9 @@ def test_main_propagates_command_start_and_execution_provenance(
     monkeypatch.setattr(
         parallel,
         "execution_details",
-        lambda: execution,
+        lambda workers: dict(execution),
     )
+    monkeypatch.setattr(parallel, "available_cpu_count", lambda: 8)
 
     def fake_run_new(
         args,
@@ -106,7 +137,11 @@ def test_main_propagates_command_start_and_execution_provenance(
 
     assert main.main(["--mode", "smoke"]) == 0
     assert captured["command_started"] == 123.5
-    assert captured["environment"] == {
-        "python_version": "3.12.0",
-        "execution": execution,
+    environment = captured["environment"]
+    assert isinstance(environment, dict)
+    assert environment["python_version"] == "3.12.0"
+    assert environment["execution"] == {
+        **execution,
+        "requested_worker_count": 1,
+        "worker_count_capped_to_allocation": False,
     }

@@ -63,7 +63,7 @@ def test_writes_exact_table_contract_and_provenance_archive(
     )
     archive_path = build_result_archive(run_dir, "smoke")
 
-    assert len(paths) == 23
+    assert len(paths) == 31
     assert metadata_path.is_file()
     assert json.loads(metadata_path.read_text())["run_mode"] == "smoke"
     with zipfile.ZipFile(archive_path) as archive:

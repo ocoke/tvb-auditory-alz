@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from dataclasses import replace
 
 import pytest
 
@@ -56,18 +57,18 @@ def test_final_workload_counts_include_calibration() -> None:
     assert counts.to_dict() == {
         "calibration": 12,
         "main": 60,
-        "local_dynamics_counterfactual": 20,
+        "local_dynamics_counterfactual": 40,
         "sensitivity": 24,
         "spatial_shuffle": 300,
         "integration_step_check": 6,
-        "manifest": 410,
-        "total": 422,
+        "manifest": 430,
+        "total": 442,
     }
 
 
 @pytest.mark.parametrize(
     ("mode", "manifest", "total"),
-    [("smoke", 27, 29), ("pilot", 56, 62), ("final", 410, 422)],
+    [("smoke", 31, 33), ("pilot", 64, 70), ("final", 430, 442)],
 )
 def test_all_mode_workload_totals(
     mode: str, manifest: int, total: int
@@ -95,6 +96,11 @@ def test_config_is_immutable() -> None:
         MODE_CONFIGS["final"] = MODE_CONFIGS["smoke"]  # type: ignore[index]
 
 
+def test_reference_integration_step_must_be_finer() -> None:
+    with pytest.raises(ValueError, match="smaller"):
+        replace(DEFAULT_CONFIG, reference_dt_ms=DEFAULT_CONFIG.main_dt_ms)
+
+
 def test_config_serialization_is_canonical_and_digestible() -> None:
     payload = config_to_dict(DEFAULT_CONFIG)
     assert payload["mode"] == "final"
@@ -102,6 +108,16 @@ def test_config_serialization_is_canonical_and_digestible() -> None:
     assert payload["experiment"]["n_regions"] == 379
     assert payload["experiment"]["dt_check_severities"] == [0.0, 1.0]
     assert payload["experiment"]["dt_check_probes"] == ["2Hz", "5Hz"]
+    assert payload["experiment"]["dt_check_networks"] == [
+        "music",
+        "speech",
+        "music_semantic_task_associated",
+        "music_episodic_task_associated",
+        "shared_auditory_relay",
+    ]
+    assert payload["experiment"]["main_dt_ms"] == 0.5
+    assert payload["experiment"]["reference_dt_ms"] == 0.25
+    assert payload["experiment"]["dt_relative_tolerance"] == 0.05
     assert config_to_json(DEFAULT_CONFIG) == config_to_json(DEFAULT_CONFIG)
     assert config_digest_input(DEFAULT_CONFIG) == config_to_json(
         DEFAULT_CONFIG

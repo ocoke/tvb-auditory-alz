@@ -9,11 +9,13 @@ Code repository and notebook created by Junxin Yu.
 
 
 
-This is a runnable Python project for the 379-region TVB experiment originally
-implemented in `RISE_TVB379_Complete_Experiment.ipynb`. It studies how an
-AD-like, amyloid-linked change in inhibitory dynamics affects simulated
-stimulus transmission from bilateral primary auditory cortex (A1) to
-predeclared music-associated and speech-associated proxy subnetworks.
+This is the runnable Python-project form of
+`RISE_TVB379_Complete_Experiment_Semantic_Episodic_Parallel.ipynb`. It studies
+how an AD-like, amyloid-linked change in inhibitory dynamics affects simulated
+stimulus transmission from bilateral primary auditory cortex (A1) through
+explicit shared-auditory, music-associated, and speech-associated proxy
+pathways. A prespecified secondary analysis compares semantic-task-associated
+and episodic-task-associated musical-memory proxy parcels.
 
 The project runs directly from this repository:
 
@@ -27,10 +29,10 @@ installing the pinned third-party dependencies.
 
 > `python main.py` starts the `final`-mode experiment immediately, without an
 > interactive confirmation. It is configured for 100 spatial shuffles if the
-> required convergence gate passes and creates one worker per available logical
-> CPU. Wall-clock time depends strongly on the machine; the runner prints
-> elapsed time and an estimated time remaining as measurements become
-> available. Use `smoke` for an initial technical check.
+> required convergence gate passes. It uses one process by default. Opt in to
+> multiprocessing with `--workers auto` or `--workers N`. Wall-clock time
+> depends strongly on the machine; the runner prints elapsed time and an
+> estimated time remaining as measurements become available.
 
 ## Requirements and one-time setup
 
@@ -77,9 +79,9 @@ python main.py --mode final
 
 | Mode | Purpose and workload |
 | --- | --- |
-| `smoke` | Gate-reaching technical diagnostic using seed 11, baseline and high endpoints, 40 matched controls, and one spatial shuffle. Its planned maximum is 29 TVB calls, 27 of which would appear in the run manifest. It is not adequate for scientific interpretation. |
-| `pilot` | Intermediate diagnostic using seeds 11 and 23, all three perturbation levels, 200 matched controls, and two spatial shuffles. Its planned maximum is 62 TVB calls, with 56 manifested. |
-| `final` | Full experiment using five numerical seeds, all three perturbation levels, 500 matched controls, four parameter-sensitivity scenarios, and 100 spatial shuffles. This is the default; its planned maximum is 422 TVB calls, with 410 manifested and 12 separately recorded calibration calls. |
+| `smoke` | Gate-reaching technical diagnostic using seed 11, baseline and high endpoints, 40 matched controls per comparison, and one spatial shuffle. Its planned maximum is 33 TVB calls, 31 of which appear in the run manifest. It is not adequate for scientific interpretation. |
+| `pilot` | Intermediate diagnostic using seeds 11 and 23, all three perturbation levels, 200 matched controls per comparison, and two spatial shuffles. Its planned maximum is 70 TVB calls, with 64 manifested. |
+| `final` | Full experiment using five numerical seeds, all three perturbation levels, 500 matched controls per comparison, four parameter-sensitivity scenarios, and 100 spatial shuffles. This is the default; its planned maximum is 442 TVB calls, with 430 manifested and 12 separately recorded calibration calls. |
 
 Those are resolved workloads, not a promise that every call will execute. All
 three modes stop after stage 3 if the required convergence gate fails.
@@ -106,11 +108,24 @@ python main.py --help
 
 ### CPU use, progress, and timing
 
-The runner detects the logical CPUs available to the process and creates one
-spawned worker process per available CPU. Each worker uses one native numerical
-thread. This avoids multiplying a full BLAS/OpenMP thread pool inside every
-worker. Active CPU use is bounded by the number of independent blocks ready in
-the current stage; stages with enough blocks can use every available CPU.
+The default is deliberately single-process:
+
+```bash
+python main.py --mode smoke --workers 1
+```
+
+Parallel execution is optional:
+
+```bash
+python main.py --mode smoke --workers auto  # all CPUs allocated to this job
+python main.py --mode smoke --workers 4     # at most four worker processes
+```
+
+TVB work here is CPU-bound, so `--workers` uses independent **processes**, not
+Python threads. `auto` respects process affinity and common scheduler limits;
+an explicit count above the detected allocation is capped. Each worker uses
+one native numerical thread, preventing nested BLAS/OpenMP oversubscription.
+Active CPU use is also bounded by the independent blocks ready in a stage.
 
 Checkpoint loading and writing remain in the parent process. Completed worker
 results are aggregated in their declared scientific order, rather than worker
@@ -120,9 +135,10 @@ checkpoint identity.
 Progress messages are written both to the terminal and `run.log`. They identify
 the current stage and work unit and report completed/total TVB calls, percentage
 complete, elapsed time, and an ETA once enough current-run measurements exist.
-On resume, already verified checkpoints are reported as restored work. The ETA
-is an estimate and can change as the workflow moves between 1.0 ms, 0.5 ms, and
-shorter calibration simulations.
+On resume, already verified checkpoints are reported as restored work.
+`--workers` may be changed for a resume because it affects execution only, not
+the scientific configuration. The ETA is an estimate and can change as the
+workflow moves between 0.5 ms, 0.25 ms, and shorter calibration simulations.
 
 The completion summary distinguishes:
 
@@ -194,6 +210,8 @@ interruption, explicitly resume the incomplete run:
 
 ```bash
 python main.py --resume /path/to/runs/20260728T180000Z_final_ab12cd34
+python main.py --resume /path/to/runs/20260728T180000Z_final_ab12cd34 \
+  --workers auto
 ```
 
 `--resume` cannot be combined with `--mode`, `--output-root`, `--data-dir`, or
@@ -214,45 +232,35 @@ The stages run in this order:
 
 1. Baseline-only coupling calibration
 2. Main full-field experiment
-3. Required 1.0 ms versus 0.5 ms integration-step convergence gate
-4. Local-dynamics-held-baseline counterfactual
-5. Topology/pathology-matched control subnetworks
+3. Required 0.5 ms versus 0.25 ms integration-step convergence gate
+4. Separate primary-pathway and memory-proxy local-dynamics counterfactuals
+5. Separate topology/pathology-matched primary and memory control subnetworks
 6. Coupling and stimulus-strength sensitivity
 7. Within-anatomical-block spatial shuffles
 8. Figures, tables, metadata, and final ZIP export
 
-The convergence gate is deliberately early. It compares the baseline and high
-AD-like endpoints at both 2 Hz and 5 Hz for the music and speech proxy
-networks. This produces eight comparison rows. Each row reports transfer at
-1.0 ms and 0.5 ms, their relative difference, median target-fit R² at both
-steps, and the absolute R² difference as a signal-quality diagnostic. The run
-stops if any transfer differs by 5% or more, avoiding hours of downstream
-computation from a numerically unacceptable main integration step.
-
-**Observed validation result (2026-07-28):** with the pinned Python 3.12
-environment, a real smoke run stopped at this gate. The high-endpoint 5 Hz
-speech comparison had a relative transfer difference of `0.0509171171`
-(`5.0917%`), just above the prespecified limit. An independent single-process
-repeat reproduced the 0.5 ms transfer (`0.0007979828041`), confirming that the
-failure was not caused by parallel scheduling. The median target-fit R² was
-`0.0110693` at 1.0 ms and `0.0156564` at 0.5 ms (absolute difference
-`0.00458705`), so the low signal-quality diagnostic should be considered
-alongside the transfer difference. Pilot and final modes use the same seed-11
-endpoint check and are therefore expected to stop at the same gate on a
-numerically comparable environment. Treat this as a convergence finding, not
-as a reason to silently bypass or relax the threshold.
+The convergence gate is deliberately early. It recomputes the baseline and
+high AD-like endpoints at both 2 Hz and 5 Hz using 0.25 ms, then compares them
+with the main 0.5 ms results. The five inferential networks are music, speech,
+semantic-task-associated, episodic-task-associated, and shared auditory relay.
+Every declared context network is also reported. Each row includes transfer
+and median target-fit R² at both steps, relative transfer difference, and the
+absolute R² difference. A relative difference of 5% or more stops the run for
+an inferential network. A descriptive context-network failure is preserved and
+warned about but does not change the prespecified inferential gate.
 
 Matplotlib uses a noninteractive backend. Figures are written to disk rather
 than displayed, so the project can run in a terminal or headless environment.
 
 ## Results
 
-A completed run preserves the notebook's 23 CSV outputs:
+A completed run preserves the notebook's 31 CSV outputs:
 
 ```text
 source_manifest.csv
 data_quality_checks.csv
 roi_definitions.csv
+music_memory_peak_mapping.csv
 roi_pathology_values.csv
 pathology_summary.csv
 baseline_coupling_calibration.csv
@@ -260,22 +268,29 @@ main_node_metrics.csv
 main_network_metrics.csv
 main_network_metrics_normalized.csv
 main_music_minus_speech_contrasts.csv
+main_semantic_minus_episodic_contrasts.csv
 main_stage_summary.csv
 local_fixed_node_metrics.csv
 local_fixed_network_metrics.csv
 local_fixed_contrasts.csv
+memory_counterfactual_comparison.csv
 matched_control_sets.csv
 matched_control_null_metrics.csv
 matched_control_null_summary.csv
+memory_matched_control_sets.csv
+memory_matched_control_null_metrics.csv
+memory_matched_control_null_summary.csv
 sensitivity_network_metrics.csv
 sensitivity_contrasts.csv
 spatial_shuffle_network_metrics.csv
 spatial_shuffle_contrasts.csv
+spatial_shuffle_summary.csv
+memory_spatial_shuffle_summary.csv
 integration_step_check.csv
 run_manifest.csv
 ```
 
-It also writes `experiment_metadata.json` and seven PNG figures:
+It also writes `experiment_metadata.json` and ten PNG figures:
 
 ```text
 01_baseline_coupling_calibration.png
@@ -285,6 +300,9 @@ It also writes `experiment_metadata.json` and seven PNG figures:
 05_matched_control_null.png
 06_parameter_sensitivity.png
 07_spatial_placement_sensitivity.png
+08_semantic_episodic_secondary_analysis.png
+09_semantic_episodic_matched_null.png
+10_semantic_episodic_robustness.png
 ```
 
 The final ZIP contains the scientific outputs, metadata, run log, resolved
@@ -314,6 +332,18 @@ A positive value means that the music proxy changed more favorably than the
 speech proxy **inside this model**. It does not demonstrate preserved music
 pathways, musical memory, or clinical function.
 
+The prespecified secondary contrast is:
+
+```text
+semantic-task-associated baseline-normalized log2 transfer
+    - episodic-task-associated baseline-normalized log2 transfer
+```
+
+Those parcels are approximate HCP-MMP mappings of nine SPM99 peaks reported by
+Platel et al. (2003). The mapping is exported in
+`music_memory_peak_mapping.csv`. This is a separate mechanistic proxy analysis,
+not a behavioral memory experiment.
+
 Interpret results in context:
 
 1. Check main-stage changes and consistency across 2 Hz, 5 Hz, and seeds.
@@ -336,8 +366,9 @@ Important limitations include:
 - Interregional delays are zero, excluding realistic latency and phase claims.
 - Tractography can omit or falsely identify connections and does not establish
   biological direction.
-- The small, equal-sized parcel groups are proxy subnetworks, not complete or
-  exclusive music and speech pathways.
+- The parcel groups are unequal-sized operational proxy subnetworks, not
+  complete or exclusive biological pathways. Matched controls preserve each
+  declared group size and hemispheric composition.
 - The 2 Hz and 5 Hz probes are temporal envelopes, not recordings of music or
   speech; they omit melody, pitch, timbre, language, meaning, familiarity, and
   emotion.
@@ -346,11 +377,13 @@ Important limitations include:
 - Numerical seeds, control sets, and shuffle percentiles are simulation
   diagnostics, not human subjects or clinical p-values.
 
-The source notebook is retained at
-`notebooks/RISE_TVB379_Complete_Experiment.ipynb` for auditability and has been
-intentionally updated so its required integration-step convergence check
-matches the Python runner. The Python project remains the supported
-command-line runner.
+The source notebooks are retained unchanged for auditability:
+
+- `notebooks/RISE_TVB379_Complete_Experiment_Semantic_Episodic_Parallel.ipynb`
+  is the current scientific specification.
+- `notebooks/RISE_TVB379_Complete_Experiment.ipynb` is the earlier experiment.
+
+The Python project is the supported command-line runner.
 
 ## Development checks
 
@@ -363,10 +396,10 @@ python -m pytest
 ```
 
 The test suite uses lightweight deterministic substitutes where possible.
-A real `smoke` run remains a substantial gate-reaching integration diagnostic.
-The planned 422-call `final` workload is not intended to run as part of the
-normal test suite; its actual elapsed time depends on available CPUs, memory
-bandwidth, host load, and whether the convergence gate passes.
+Even `--mode smoke` is a substantial 33-call gate-reaching integration
+diagnostic. The planned 442-call `final` workload is not intended to run as
+part of the normal test suite; its actual elapsed time depends on allocated
+CPUs, memory bandwidth, host load, and whether the convergence gate passes.
 
 ## Primary references
 
@@ -394,6 +427,12 @@ bandwidth, host load, and whether the convergence gate passes.
   “Distinct cortical pathways for music and speech revealed by hypothesis-free
   voxel decomposition.”
   [Neuron, 88, 1281–1296](https://doi.org/10.1016/j.neuron.2015.11.035).
+- Platel, H., et al. (2003). “Semantic and episodic memory of music are
+  subserved by distinct neural networks.”
+  [NeuroImage, 20, 244–256](https://doi.org/10.1016/S1053-8119(03)00287-8).
+- Slattery, C. F., et al. (2019). “The functional neuroanatomy of musical
+  memory in Alzheimer’s disease.”
+  [Cortex, 115, 357–370](https://doi.org/10.1016/j.cortex.2019.02.003).
 - Maier-Hein, K. H., et al. (2017). “The challenge of mapping the human
   connectome based on diffusion tractography.”
   [Nature Communications, 8, 1349](https://doi.org/10.1038/s41467-017-01285-x).

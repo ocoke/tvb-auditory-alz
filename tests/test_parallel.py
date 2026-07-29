@@ -241,6 +241,22 @@ def test_available_cpu_count_prefers_affinity_and_has_safe_fallback(
     assert parallel.available_cpu_count() == 1
 
 
+def test_available_cpu_count_honors_scheduler_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        parallel.os,
+        "sched_getaffinity",
+        lambda process_id: set(range(12)),
+        raising=False,
+    )
+    monkeypatch.setattr(parallel.os, "cpu_count", lambda: 16)
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "4")
+
+    assert parallel.available_cpu_count() == 4
+    assert parallel.cpu_allocation_sources()["SLURM_CPUS_PER_TASK"] == 4
+
+
 def test_execution_details_defaults_to_every_available_cpu(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -255,8 +271,58 @@ def test_execution_details_defaults_to_every_available_cpu(
     assert automatic["native_threads_per_worker"] == 1
     assert automatic["oversubscribed"] is False
     assert explicit["worker_count"] == 3
+    serial = parallel.execution_details(1)
+    assert serial["execution_mode"] == "single_process"
+    assert serial["parallel_enabled"] is False
+    assert serial["multiprocessing_start_method"] is None
     with pytest.raises(ValueError, match="worker_count"):
         parallel.execution_details(-1)
+
+
+def test_serial_runner_executes_in_current_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rise_tvb379 import simulation
+
+    initialized: list[bool] = []
+    monkeypatch.setattr(
+        simulation,
+        "initialize_tvb_runtime",
+        lambda: initialized.append(True),
+    )
+    monkeypatch.setattr(
+        simulation,
+        "SimulationContext",
+        lambda **values: values,
+    )
+    monkeypatch.setattr(
+        simulation,
+        "run_condition_seed_block",
+        lambda context, **payload: {
+            "context": context,
+            "payload": payload,
+        },
+    )
+    job = parallel.WorkerJob(
+        0,
+        "simulation",
+        {"scope": "minimal", "seed": 11},
+    )
+
+    with parallel.SerialRunner(
+        TinyContext(379, "serial"),
+        tmp_path,
+    ) as runner:
+        outcomes = list(runner.execute([job]))
+
+    assert initialized == [True]
+    assert outcomes[0].worker_pid == os.getpid()
+    assert outcomes[0].result == {
+        "context": {"n_regions": 379, "label": "serial"},
+        "payload": {"scope": "minimal", "seed": 11},
+    }
+    assert (tmp_path / ".runtime" / "serial" / "tvb").is_dir()
 
 
 def test_worker_job_validates_and_plainly_copies_payload() -> None:

@@ -55,11 +55,16 @@ def test_pulse_rms_uses_prespecified_window() -> None:
 
 def test_normalization_and_music_minus_speech_contrast() -> None:
     rows = []
-    for severity, music, speech in [
-        (0.0, 2.0, 4.0),
-        (1.0, 4.0, 2.0),
+    for severity, music, speech, semantic, episodic in [
+        (0.0, 2.0, 4.0, 3.0, 6.0),
+        (1.0, 4.0, 2.0, 6.0, 3.0),
     ]:
-        for network, transfer in [("music", music), ("speech", speech)]:
+        for network, transfer in [
+            ("music", music),
+            ("speech", speech),
+            ("music_semantic_task_associated", semantic),
+            ("music_episodic_task_associated", episodic),
+        ]:
             rows.append(
                 {
                     "scope": "main",
@@ -70,7 +75,7 @@ def test_normalization_and_music_minus_speech_contrast() -> None:
                     "probe": "2Hz",
                     "global_coupling": 60.0,
                     "input_peak_per_ms": 0.02,
-                    "dt_ms": 1.0,
+                    "dt_ms": 0.5,
                     "network": network,
                     "transfer": transfer,
                 }
@@ -81,6 +86,11 @@ def test_normalization_and_music_minus_speech_contrast() -> None:
     assert endpoint["music"] == pytest.approx(1.0)
     assert endpoint["speech"] == pytest.approx(-1.0)
     assert endpoint["music_minus_speech_log2_change"] == pytest.approx(2.0)
+    assert endpoint["music_semantic_task_associated"] == pytest.approx(1.0)
+    assert endpoint["music_episodic_task_associated"] == pytest.approx(-1.0)
+    assert endpoint[
+        "semantic_minus_episodic_log2_change"
+    ] == pytest.approx(2.0)
 
 
 def test_normalization_refuses_missing_baseline() -> None:

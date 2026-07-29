@@ -489,6 +489,8 @@ def test_real_convergence_failure_is_recorded_and_resume_compatible(
                 main_network_df=pd.DataFrame(main_rows),
                 reference_network_df=pd.DataFrame(reference_rows),
                 main_seed=11,
+                networks=("music", "speech"),
+                inferential_networks=("music", "speech"),
             )
 
     failed = load_run_status(run_dir)

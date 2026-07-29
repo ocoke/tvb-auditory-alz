@@ -16,28 +16,394 @@ from typing import BinaryIO, Callable, Iterable, Mapping
 import numpy as np
 import pandas as pd
 
-from .config import N_REGIONS, SEVERITY_LABELS
+from .config import (
+    DT_CHECK_NETWORKS,
+    N_REGIONS,
+    SEVERITY_LABELS,
+)
 
 EDUCASE_COMMIT = "659d4fcbf58d74867fa9d10a874deac854532ee1"
 PIPELINE_COMMIT = "8be09e33e1131ed2f0764506940e6172de275285"
 
-A1_LABELS = ("L_A1", "R_A1")
-MUSIC_LABELS = ("L_6ma", "R_6ma", "L_24dd", "R_24dd")
-SPEECH_LABELS = ("L_STSdp", "R_STSdp", "L_44", "R_44")
+def bilateral(*parcel_names: str) -> tuple[str, ...]:
+    """Convert HCP parcel names into alternating left/right labels."""
+
+    return tuple(
+        label
+        for parcel in parcel_names
+        for label in (f"L_{parcel}", f"R_{parcel}")
+    )
+
+
+def ordered_union(*groups: Iterable[str]) -> tuple[str, ...]:
+    """Combine label groups while preserving order and removing duplicates."""
+
+    return tuple(
+        dict.fromkeys(label for group in groups for label in group)
+    )
+
+
+ROI_GROUPS: Mapping[str, Mapping[str, object]] = MappingProxyType(
+    {
+        "a1_input": {
+            "labels": bilateral("A1"),
+            "analysis_role": "stimulus",
+            "interpretation": (
+                "Bilateral primary auditory cortex receiving the external input."
+            ),
+        },
+        "shared_early_auditory_relay": {
+            "labels": bilateral("52", "MBelt", "LBelt", "RI"),
+            "analysis_role": "shared_relay",
+            "interpretation": (
+                "Early auditory belt and retroinsular relay shared by both "
+                "branches."
+            ),
+        },
+        "shared_parabelt": {
+            "labels": bilateral("PBelt"),
+            "analysis_role": "shared_relay",
+            "interpretation": (
+                "Available HCP parabelt parcel. HCP-MMP does not separately "
+                "represent rostral and caudal parabelt."
+            ),
+        },
+        "shared_auditory_association": {
+            "labels": bilateral("A4", "A5"),
+            "analysis_role": "shared_relay",
+            "interpretation": (
+                "Nonprimary auditory association cortex downstream of parabelt."
+            ),
+        },
+        "diagram_music_temporal_proxy": {
+            "labels": bilateral("TA2", "STGa"),
+            "analysis_role": "primary_music",
+            "interpretation": (
+                "Planum-polare/anterior auditory proxy from the pathway diagram. "
+                "This is not parcel-level proof of music selectivity."
+            ),
+        },
+        "music_memory_core_proxy": {
+            "labels": bilateral("6ma", "24dd"),
+            "analysis_role": "primary_music",
+            "interpretation": (
+                "Parcel approximations of ventral pre-SMA and caudal anterior "
+                "cingulate musical-memory regions."
+            ),
+        },
+        "music_semantic_task_associated": {
+            "labels": (
+                "R_9m",
+                "L_25",
+                "R_TE1a",
+                "L_TF",
+                "L_STSda",
+            ),
+            "analysis_role": "secondary_music_memory",
+            "interpretation": (
+                "HCP-MMP parcels mapped from cortical peaks in the Platel et al. "
+                "semantic-greater-than-episodic musical-memory contrast."
+            ),
+        },
+        "music_episodic_task_associated": {
+            "labels": (
+                "R_IP1",
+                "R_PCV",
+                "R_11l",
+                "R_8Av",
+            ),
+            "analysis_role": "secondary_music_memory",
+            "interpretation": (
+                "HCP-MMP parcels mapped from cortical peaks in the Platel et al. "
+                "episodic-greater-than-semantic musical-memory contrast."
+            ),
+        },
+        "music_anterior_temporal_context": {
+            "labels": bilateral("TGd", "TGv", "TE1a", "TE2a"),
+            "analysis_role": "diagnostic_only",
+            "interpretation": (
+                "Anterior temporal semantic and conceptual context."
+            ),
+        },
+        "music_frontoparietal_context": {
+            "labels": bilateral(
+                "10r",
+                "47l",
+                "a9-46v",
+                "46",
+                "8Ad",
+                "8Av",
+                "PFm",
+                "PGi",
+                "PGs",
+            ),
+            "analysis_role": "diagnostic_only",
+            "interpretation": (
+                "Diagram-mapped ventrolateral/dorsolateral prefrontal and "
+                "inferior-parietal context."
+            ),
+        },
+        "music_medial_temporal_context": {
+            "labels": (
+                "Left-Hippocampus",
+                "Right-Hippocampus",
+                "Left-Amygdala",
+                "Right-Amygdala",
+            ),
+            "analysis_role": "diagnostic_only",
+            "interpretation": (
+                "Medial-temporal context from the diagram. The Jansen-Rit "
+                "model does not implement memory encoding or retrieval."
+            ),
+        },
+        "speech_posterior_temporal": {
+            "labels": bilateral("PSL", "PFcm", "STSdp", "TPOJ1"),
+            "analysis_role": "primary_speech",
+            "interpretation": (
+                "Bilateral posterior temporal and perisylvian "
+                "auditory-language targets."
+            ),
+        },
+        "speech_left_frontal": {
+            "labels": (
+                "L_44",
+                "L_45",
+                "L_47l",
+                "L_FOP4",
+                "L_8C",
+                "L_SCEF",
+            ),
+            "analysis_role": "primary_speech",
+            "interpretation": (
+                "Left-lateralized inferior and medial frontal language targets."
+            ),
+        },
+        "speech_dorsal_left": {
+            "labels": (
+                "L_PSL",
+                "L_PFcm",
+                "L_TPOJ1",
+                "L_PF",
+                "L_PFm",
+                "L_PGi",
+                "L_PGs",
+                "L_PGp",
+                "L_55b",
+                "L_6r",
+                "L_4",
+                "L_44",
+                "L_FOP4",
+                "L_8C",
+                "L_SCEF",
+            ),
+            "analysis_role": "diagnostic_only",
+            "interpretation": (
+                "Left temporoparietal-to-premotor/articulatory dorsal stream."
+            ),
+        },
+        "speech_ventral": {
+            "labels": ordered_union(
+                bilateral(
+                    "STSda",
+                    "STSdp",
+                    "STSva",
+                    "STSvp",
+                    "TE1a",
+                    "TE1m",
+                    "TE1p",
+                    "TE2a",
+                    "TE2p",
+                    "TGd",
+                    "TGv",
+                ),
+                ("L_45", "L_47l"),
+            ),
+            "analysis_role": "diagnostic_only",
+            "interpretation": (
+                "Bilateral temporal semantic stream with left "
+                "inferior-frontal outputs."
+            ),
+        },
+    }
+)
+
+A1_LABELS = tuple(ROI_GROUPS["a1_input"]["labels"])
+MUSIC_LABELS = ordered_union(
+    *(
+        tuple(specification["labels"])
+        for specification in ROI_GROUPS.values()
+        if specification["analysis_role"] == "primary_music"
+    )
+)
+SPEECH_LABELS = ordered_union(
+    *(
+        tuple(specification["labels"])
+        for specification in ROI_GROUPS.values()
+        if specification["analysis_role"] == "primary_speech"
+    )
+)
+SEMANTIC_MEMORY_LABELS = tuple(
+    ROI_GROUPS["music_semantic_task_associated"]["labels"]
+)
+EPISODIC_MEMORY_LABELS = tuple(
+    ROI_GROUPS["music_episodic_task_associated"]["labels"]
+)
+ALL_ROI_LABELS = ordered_union(
+    *(tuple(specification["labels"]) for specification in ROI_GROUPS.values())
+)
+
+NETWORK_LABELS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "music": MUSIC_LABELS,
+        "speech": SPEECH_LABELS,
+        "shared_auditory_relay": ordered_union(
+            tuple(ROI_GROUPS["shared_early_auditory_relay"]["labels"]),
+            tuple(ROI_GROUPS["shared_parabelt"]["labels"]),
+            tuple(ROI_GROUPS["shared_auditory_association"]["labels"]),
+        ),
+        **{
+            group_name: tuple(specification["labels"])
+            for group_name, specification in ROI_GROUPS.items()
+            if group_name != "a1_input"
+        },
+    }
+)
+
+if not set(DT_CHECK_NETWORKS).issubset(NETWORK_LABELS):
+    raise RuntimeError("Inferential convergence networks are not defined.")
 
 EXPECTED_ANCHORS: Mapping[str, int] = MappingProxyType(
     {
         "L_A1": 23,
         "R_A1": 203,
+        "L_TA2": 106,
+        "R_TA2": 286,
+        "L_STGa": 122,
+        "R_STGa": 302,
         "L_6ma": 43,
         "R_6ma": 223,
         "L_24dd": 39,
         "R_24dd": 219,
+        "L_PSL": 24,
+        "R_PSL": 204,
+        "L_PFcm": 104,
+        "R_PFcm": 284,
         "L_STSdp": 128,
         "R_STSdp": 308,
+        "L_TPOJ1": 138,
+        "R_TPOJ1": 318,
         "L_44": 73,
-        "R_44": 253,
+        "L_45": 74,
+        "L_47l": 75,
+        "L_FOP4": 107,
+        "L_8C": 72,
+        "L_SCEF": 42,
+        "R_9m": 248,
+        "L_25": 163,
+        "R_TE1a": 311,
+        "L_TF": 134,
+        "L_STSda": 127,
+        "R_IP1": 324,
+        "R_PCV": 206,
+        "R_11l": 270,
+        "R_8Av": 246,
     }
+)
+
+MUSIC_MEMORY_PEAK_MAPPINGS: tuple[dict[str, object], ...] = (
+    {
+        "source_contrast": "semantic > episodic",
+        "reported_region": "bilateral medial frontal cortex (BA 11/10)",
+        "spm99_x": 0,
+        "spm99_y": 60,
+        "spm99_z": 10,
+        "hcp_label": "R_9m",
+        "mapping_distance_mm": 1.0,
+        "mapping_note": "nearest volumetric HCP-MMP parcel",
+    },
+    {
+        "source_contrast": "semantic > episodic",
+        "reported_region": "bilateral medial frontal cortex (BA 11/10)",
+        "spm99_x": -4,
+        "spm99_y": 18,
+        "spm99_z": -18,
+        "hcp_label": "L_25",
+        "mapping_distance_mm": 0.0,
+        "mapping_note": "coordinate falls inside parcel",
+    },
+    {
+        "source_contrast": "semantic > episodic",
+        "reported_region": "right middle temporal gyrus (BA 21)",
+        "spm99_x": 56,
+        "spm99_y": 4,
+        "spm99_z": -24,
+        "hcp_label": "R_TE1a",
+        "mapping_distance_mm": 0.0,
+        "mapping_note": "coordinate falls inside parcel",
+    },
+    {
+        "source_contrast": "semantic > episodic",
+        "reported_region": "left inferior/middle temporal gyri (BA 20/21)",
+        "spm99_x": -48,
+        "spm99_y": -26,
+        "spm99_z": -22,
+        "hcp_label": "L_TF",
+        "mapping_distance_mm": 0.0,
+        "mapping_note": "coordinate falls inside parcel",
+    },
+    {
+        "source_contrast": "semantic > episodic",
+        "reported_region": "left inferior/middle temporal gyri (BA 20/21)",
+        "spm99_x": -54,
+        "spm99_y": -2,
+        "spm99_z": -18,
+        "hcp_label": "L_STSda",
+        "mapping_distance_mm": 0.0,
+        "mapping_note": "coordinate falls inside parcel",
+    },
+    {
+        "source_contrast": "episodic > semantic",
+        "reported_region": "right precuneus/parietal cortex (BA 7/19)",
+        "spm99_x": 36,
+        "spm99_y": -66,
+        "spm99_z": 38,
+        "hcp_label": "R_IP1",
+        "mapping_distance_mm": 2.0,
+        "mapping_note": "nearest volumetric HCP-MMP parcel",
+    },
+    {
+        "source_contrast": "episodic > semantic",
+        "reported_region": "precuneus (BA 7)",
+        "spm99_x": 4,
+        "spm99_y": -56,
+        "spm99_z": 42,
+        "hcp_label": "R_PCV",
+        "mapping_distance_mm": 0.0,
+        "mapping_note": "coordinate falls inside parcel",
+    },
+    {
+        "source_contrast": "episodic > semantic",
+        "reported_region": "right superior frontal gyrus (BA 11)",
+        "spm99_x": 34,
+        "spm99_y": 52,
+        "spm99_z": -14,
+        "hcp_label": "R_11l",
+        "mapping_distance_mm": 1.0,
+        "mapping_note": (
+            "nearest parcel consistent with reported BA11 anatomy; "
+            "volumetric boundary"
+        ),
+    },
+    {
+        "source_contrast": "episodic > semantic",
+        "reported_region": "right middle frontal gyrus (BA 8/9)",
+        "spm99_x": 38,
+        "spm99_y": 12,
+        "spm99_z": 44,
+        "hcp_label": "R_8Av",
+        "mapping_distance_mm": 1.0,
+        "mapping_note": "nearest volumetric HCP-MMP parcel",
+    },
 )
 
 
@@ -170,11 +536,20 @@ class ROISelections:
     a1_labels: tuple[str, ...]
     music_labels: tuple[str, ...]
     speech_labels: tuple[str, ...]
+    semantic_memory_labels: tuple[str, ...]
+    episodic_memory_labels: tuple[str, ...]
     a1_indices: np.ndarray
     music_indices: np.ndarray
     speech_indices: np.ndarray
+    semantic_memory_indices: np.ndarray
+    episodic_memory_indices: np.ndarray
+    network_labels: Mapping[str, tuple[str, ...]]
+    network_indices: Mapping[str, np.ndarray]
     all_declared_indices: np.ndarray
+    primary_counterfactual_fixed_indices: np.ndarray
+    memory_counterfactual_fixed_indices: np.ndarray
     definition_df: pd.DataFrame
+    peak_mapping_df: pd.DataFrame
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,14 +859,31 @@ def build_roi_definitions(
 ) -> ROISelections:
     """Resolve and validate the predeclared stimulation/target parcels."""
 
-    missing = [
-        label
-        for label in (*A1_LABELS, *MUSIC_LABELS, *SPEECH_LABELS)
-        if label not in label_to_index
-    ]
+    missing = sorted(set(ALL_ROI_LABELS) - set(label_to_index))
     if missing:
         raise DataValidationError(
             "Missing predeclared parcel labels: " + ", ".join(missing)
+        )
+
+    for group_name, specification in ROI_GROUPS.items():
+        group_labels = tuple(specification["labels"])
+        if len(group_labels) != len(set(group_labels)):
+            raise DataValidationError(
+                f"Duplicate label inside ROI group {group_name!r}."
+            )
+
+    primary_overlap = sorted(set(MUSIC_LABELS) & set(SPEECH_LABELS))
+    if primary_overlap:
+        raise DataValidationError(
+            f"Primary music and speech proxies overlap: {primary_overlap}"
+        )
+    secondary_overlap = sorted(
+        set(SEMANTIC_MEMORY_LABELS) & set(EPISODIC_MEMORY_LABELS)
+    )
+    if secondary_overlap:
+        raise DataValidationError(
+            "Secondary musical-memory proxy sets overlap: "
+            f"{secondary_overlap}"
         )
 
     a1_indices = np.array(
@@ -503,64 +895,111 @@ def build_roi_definitions(
     speech_indices = np.array(
         [label_to_index[label] for label in SPEECH_LABELS], dtype=int
     )
-    if len(music_indices) != len(speech_indices):
-        raise DataValidationError(
-            "Music and speech proxy groups must have equal size."
-        )
-    all_declared_indices = np.concatenate(
-        (a1_indices, music_indices, speech_indices)
+    semantic_memory_indices = np.array(
+        [label_to_index[label] for label in SEMANTIC_MEMORY_LABELS],
+        dtype=int,
     )
-    if len(np.unique(all_declared_indices)) != len(all_declared_indices):
-        raise DataValidationError(
-            "A parcel appears in more than one predeclared group."
+    episodic_memory_indices = np.array(
+        [label_to_index[label] for label in EPISODIC_MEMORY_LABELS],
+        dtype=int,
+    )
+    network_indices = {
+        network_name: np.array(
+            [label_to_index[label] for label in network_labels],
+            dtype=int,
         )
+        for network_name, network_labels in NETWORK_LABELS.items()
+    }
+    all_declared_indices = np.array(
+        sorted(label_to_index[label] for label in ALL_ROI_LABELS),
+        dtype=int,
+    )
+    primary_counterfactual_fixed_indices = np.array(
+        sorted(
+            set(a1_indices.tolist())
+            | set(music_indices.tolist())
+            | set(speech_indices.tolist())
+        ),
+        dtype=int,
+    )
+    memory_counterfactual_fixed_indices = np.array(
+        sorted(
+            set(a1_indices.tolist())
+            | set(semantic_memory_indices.tolist())
+            | set(episodic_memory_indices.tolist())
+        ),
+        dtype=int,
+    )
 
     rows: list[dict[str, object]] = []
-    for network, labels, interpretation in (
-        (
-            "A1 seed",
-            A1_LABELS,
-            "bilateral primary auditory cortex stimulation",
-        ),
-        (
-            "Music proxy",
-            MUSIC_LABELS,
-            "parcel approximations of ventral pre-SMA and "
-            "caudal/anterior cingulate targets",
-        ),
-        (
-            "Speech proxy",
-            SPEECH_LABELS,
-            "parcel approximations of posterior STS and "
-            "inferior-frontal targets",
-        ),
-    ):
-        for label in labels:
+    for group_name, specification in ROI_GROUPS.items():
+        for label in tuple(specification["labels"]):
             rows.append(
                 {
-                    "network": network,
+                    "network": group_name,
+                    "analysis_role": specification["analysis_role"],
                     "label": label,
                     "zero_based_index": label_to_index[label],
-                    "interpretation": interpretation,
+                    "interpretation": specification["interpretation"],
                 }
             )
+
+    peak_mapping_df = pd.DataFrame(MUSIC_MEMORY_PEAK_MAPPINGS)
+    actual_semantic_mapping = set(
+        peak_mapping_df.loc[
+            peak_mapping_df["source_contrast"] == "semantic > episodic",
+            "hcp_label",
+        ]
+    )
+    actual_episodic_mapping = set(
+        peak_mapping_df.loc[
+            peak_mapping_df["source_contrast"] == "episodic > semantic",
+            "hcp_label",
+        ]
+    )
+    if actual_semantic_mapping != set(SEMANTIC_MEMORY_LABELS):
+        raise DataValidationError(
+            "Semantic peak mapping and ROI labels disagree."
+        )
+    if actual_episodic_mapping != set(EPISODIC_MEMORY_LABELS):
+        raise DataValidationError(
+            "Episodic peak mapping and ROI labels disagree."
+        )
 
     for array in (
         a1_indices,
         music_indices,
         speech_indices,
+        semantic_memory_indices,
+        episodic_memory_indices,
         all_declared_indices,
+        primary_counterfactual_fixed_indices,
+        memory_counterfactual_fixed_indices,
+        *network_indices.values(),
     ):
         array.setflags(write=False)
     return ROISelections(
         a1_labels=A1_LABELS,
         music_labels=MUSIC_LABELS,
         speech_labels=SPEECH_LABELS,
+        semantic_memory_labels=SEMANTIC_MEMORY_LABELS,
+        episodic_memory_labels=EPISODIC_MEMORY_LABELS,
         a1_indices=a1_indices,
         music_indices=music_indices,
         speech_indices=speech_indices,
+        semantic_memory_indices=semantic_memory_indices,
+        episodic_memory_indices=episodic_memory_indices,
+        network_labels=NETWORK_LABELS,
+        network_indices=MappingProxyType(network_indices),
         all_declared_indices=all_declared_indices,
+        primary_counterfactual_fixed_indices=(
+            primary_counterfactual_fixed_indices
+        ),
+        memory_counterfactual_fixed_indices=(
+            memory_counterfactual_fixed_indices
+        ),
         definition_df=pd.DataFrame(rows),
+        peak_mapping_df=peak_mapping_df,
     )
 
 

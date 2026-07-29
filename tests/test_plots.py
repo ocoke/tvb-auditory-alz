@@ -6,7 +6,7 @@ import pandas as pd
 from rise_tvb379.plots import FIGURE_FILENAMES, create_all_figures
 
 
-def test_create_all_figures_writes_seven_nonempty_pngs(tmp_path) -> None:
+def test_create_all_figures_writes_ten_nonempty_pngs(tmp_path) -> None:
     periodic_probes = ("2Hz", "5Hz")
     seeds = (11, 23)
 
@@ -20,7 +20,14 @@ def test_create_all_figures_writes_seven_nonempty_pngs(tmp_path) -> None:
 
     main_rows = []
     for probe_index, probe in enumerate(periodic_probes):
-        for network_index, network in enumerate(("music", "speech")):
+        for network_index, network in enumerate(
+            (
+                "music",
+                "speech",
+                "music_semantic_task_associated",
+                "music_episodic_task_associated",
+            )
+        ):
             for seed_index, seed in enumerate(seeds):
                 for severity in (0.0, 0.5, 1.0):
                     main_rows.append(
@@ -52,10 +59,38 @@ def test_create_all_figures_writes_seven_nonempty_pngs(tmp_path) -> None:
             for seed_index, seed in enumerate(seeds)
         ]
     )
+    secondary_endpoint_df = primary_endpoint_df.assign(
+        semantic_minus_episodic_log2_change=[
+            0.18 + 0.04 * index
+            for index in range(len(primary_endpoint_df))
+        ]
+    )
 
     analyses = (
         "Full regional perturbation",
-        "A1 and target local dynamics fixed",
+        "A1 and primary targets locally fixed",
+    )
+    memory_counterfactual_comparison_df = pd.DataFrame(
+        [
+            {
+                "probe": probe,
+                "analysis": analysis,
+                "semantic_minus_episodic_log2_change": (
+                    0.15
+                    + 0.06 * probe_index
+                    - 0.04 * analysis_index
+                    + 0.01 * seed_index
+                ),
+            }
+            for probe_index, probe in enumerate(periodic_probes)
+            for analysis_index, analysis in enumerate(
+                (
+                    "Full regional perturbation",
+                    "A1 and memory-proxy targets locally fixed",
+                )
+            )
+            for seed_index, _ in enumerate(seeds)
+        ]
     )
     counterfactual_comparison_df = pd.DataFrame(
         [
@@ -88,6 +123,19 @@ def test_create_all_figures_writes_seven_nonempty_pngs(tmp_path) -> None:
             for sample in range(12)
         ]
     )
+    memory_matched_null_df = pd.DataFrame(
+        [
+            {
+                "seed": 11,
+                "probe": probe,
+                "null_semantic_minus_episodic": (
+                    -0.15 + 0.03 * sample + 0.01 * probe_index
+                ),
+            }
+            for probe_index, probe in enumerate(periodic_probes)
+            for sample in range(12)
+        ]
+    )
 
     sensitivity_endpoint_df = pd.DataFrame(
         [
@@ -96,6 +144,9 @@ def test_create_all_figures_writes_seven_nonempty_pngs(tmp_path) -> None:
                 "probe": probe,
                 "music_minus_speech_log2_change": (
                     0.1 + 0.05 * variant_index + 0.1 * probe_index
+                ),
+                "semantic_minus_episodic_log2_change": (
+                    0.08 + 0.03 * variant_index + 0.06 * probe_index
                 ),
             }
             for variant_index, variant in enumerate(("G30", "G100"))
@@ -110,6 +161,9 @@ def test_create_all_figures_writes_seven_nonempty_pngs(tmp_path) -> None:
                 "music_minus_speech_log2_change": (
                     -0.1 + 0.05 * shuffle + 0.04 * probe_index
                 ),
+                "semantic_minus_episodic_log2_change": (
+                    -0.08 + 0.03 * shuffle + 0.02 * probe_index
+                ),
             }
             for probe_index, probe in enumerate(periodic_probes)
             for shuffle in range(5)
@@ -121,23 +175,35 @@ def test_create_all_figures_writes_seven_nonempty_pngs(tmp_path) -> None:
             "observed_contrast": [0.35, 0.55],
         }
     )
+    memory_observed_first_seed_df = pd.DataFrame(
+        {
+            "probe": periodic_probes,
+            "observed_contrast": [0.22, 0.31],
+        }
+    )
 
     figure_paths = create_all_figures(
         calibration_df=calibration_df,
         main_normalized_df=main_normalized_df,
         primary_endpoint_df=primary_endpoint_df,
+        secondary_endpoint_df=secondary_endpoint_df,
         counterfactual_comparison_df=counterfactual_comparison_df,
+        memory_counterfactual_comparison_df=(
+            memory_counterfactual_comparison_df
+        ),
         matched_null_df=matched_null_df,
+        memory_matched_null_df=memory_matched_null_df,
         main_seed=11,
         sensitivity_endpoint_df=sensitivity_endpoint_df,
         shuffle_contrast_df=shuffle_contrast_df,
         observed_first_seed_df=observed_first_seed_df,
+        memory_observed_first_seed_df=memory_observed_first_seed_df,
         periodic_probes=periodic_probes,
         figure_dir=tmp_path / "figures",
     )
 
     assert [path.name for path in figure_paths] == list(FIGURE_FILENAMES)
-    assert len(figure_paths) == 7
+    assert len(figure_paths) == 10
     assert all(
         path.is_file() and path.stat().st_size > 0
         for path in figure_paths

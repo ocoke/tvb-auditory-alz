@@ -17,6 +17,7 @@ OUTPUT_TABLE_FILENAMES: dict[str, str] = {
     "source_manifest": "source_manifest.csv",
     "data_quality": "data_quality_checks.csv",
     "roi_definitions": "roi_definitions.csv",
+    "music_memory_peak_mapping": "music_memory_peak_mapping.csv",
     "roi_pathology": "roi_pathology_values.csv",
     "pathology_summary": "pathology_summary.csv",
     "calibration": "baseline_coupling_calibration.csv",
@@ -24,17 +25,24 @@ OUTPUT_TABLE_FILENAMES: dict[str, str] = {
     "main_network": "main_network_metrics.csv",
     "main_normalized": "main_network_metrics_normalized.csv",
     "main_contrasts": "main_music_minus_speech_contrasts.csv",
+    "main_memory_contrasts": "main_semantic_minus_episodic_contrasts.csv",
     "main_stage_summary": "main_stage_summary.csv",
     "local_fixed_node": "local_fixed_node_metrics.csv",
     "local_fixed_network": "local_fixed_network_metrics.csv",
     "local_fixed_contrasts": "local_fixed_contrasts.csv",
+    "memory_counterfactual": "memory_counterfactual_comparison.csv",
     "matched_sets": "matched_control_sets.csv",
     "matched_null": "matched_control_null_metrics.csv",
     "matched_null_summary": "matched_control_null_summary.csv",
+    "memory_matched_sets": "memory_matched_control_sets.csv",
+    "memory_matched_null": "memory_matched_control_null_metrics.csv",
+    "memory_matched_null_summary": "memory_matched_control_null_summary.csv",
     "sensitivity_network": "sensitivity_network_metrics.csv",
     "sensitivity_contrasts": "sensitivity_contrasts.csv",
     "shuffle_network": "spatial_shuffle_network_metrics.csv",
     "shuffle_contrasts": "spatial_shuffle_contrasts.csv",
+    "shuffle_summary": "spatial_shuffle_summary.csv",
+    "memory_shuffle_summary": "memory_spatial_shuffle_summary.csv",
     "dt_convergence": "integration_step_check.csv",
     "run_manifest": "run_manifest.csv",
 }
@@ -86,7 +94,7 @@ def write_output_tables(
     results_dir: Path,
     tables: Mapping[str, pd.DataFrame],
 ) -> list[Path]:
-    """Write the exact 23 reader-facing CSV outputs."""
+    """Write the exact 31 reader-facing CSV outputs."""
 
     missing = sorted(set(OUTPUT_TABLE_FILENAMES) - set(tables))
     extra = sorted(set(tables) - set(OUTPUT_TABLE_FILENAMES))

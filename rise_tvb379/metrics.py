@@ -128,7 +128,7 @@ def normalize_to_baseline(
 
 
 def make_contrasts(normalized_df: pd.DataFrame) -> pd.DataFrame:
-    """Calculate the music-minus-speech change at each experiment point."""
+    """Calculate the primary and secondary prespecified contrasts."""
 
     pivot = normalized_df.pivot_table(
         index=[
@@ -145,11 +145,24 @@ def make_contrasts(normalized_df: pd.DataFrame) -> pd.DataFrame:
         columns="network",
         values="log2_transfer_vs_baseline",
     ).reset_index()
-    if not {"music", "speech"}.issubset(pivot.columns):
-        raise RuntimeError("Both network results are required for the contrast.")
+    primary_networks = {"music", "speech"}
+    secondary_networks = {
+        "music_semantic_task_associated",
+        "music_episodic_task_associated",
+    }
+    if not primary_networks.issubset(pivot.columns):
+        raise RuntimeError("Both primary network results are required.")
+    if not secondary_networks.issubset(pivot.columns):
+        raise RuntimeError(
+            "Both musical-memory proxy results are required."
+        )
     pivot.columns.name = None
     pivot["music_minus_speech_log2_change"] = (
         pivot["music"] - pivot["speech"]
+    )
+    pivot["semantic_minus_episodic_log2_change"] = (
+        pivot["music_semantic_task_associated"]
+        - pivot["music_episodic_task_associated"]
     )
     return pivot
 

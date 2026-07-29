@@ -7,72 +7,95 @@ import pandas as pd
 import pytest
 
 from rise_tvb379.analysis import (
-    build_matched_control_sets,
+    build_matched_pair_sets,
+    build_matching_features,
     check_integration_step,
 )
 from rise_tvb379.config import (
+    DT_CHECK_NETWORKS,
     DT_CHECK_PROBES,
     DT_CHECK_SEVERITIES,
     SEVERITY_LABELS,
 )
 
 
-def test_matched_sets_are_deterministic_bilateral_and_disjoint() -> None:
+def test_matched_sets_are_deterministic_size_preserving_and_disjoint() -> None:
     rng = np.random.default_rng(7)
     weights = rng.random((379, 379))
     labels = np.array([f"region_{index}" for index in range(379)])
     baseline_b = np.full(379, 0.07)
     high_b = np.linspace(0.02, 0.07, 379)
     a1 = np.array([23, 203])
-    music = np.array([43, 223, 39, 219])
-    speech = np.array([128, 308, 73, 253])
-    declared = np.r_[a1, music, speech]
-
-    _, first = build_matched_control_sets(
-        weights=weights,
-        baseline_b=baseline_b,
-        high_b=high_b,
-        labels=labels,
-        a1_indices=a1,
-        music_indices=music,
-        speech_indices=speech,
-        all_declared_indices=declared,
-        n_sets=3,
+    music = np.array([43, 223, 39, 219, 106, 286, 122, 302])
+    speech = np.array(
+        [128, 308, 73, 253, 24, 204, 104, 284, 138, 318, 74, 75, 107, 72]
     )
-    _, second = build_matched_control_sets(
+    semantic = np.array([248, 163, 311, 134, 127])
+    episodic = np.array([324, 206, 270, 246])
+    declared = np.unique(np.r_[a1, music, speech, semantic, episodic])
+
+    _, matching_z = build_matching_features(
         weights=weights,
         baseline_b=baseline_b,
         high_b=high_b,
         labels=labels,
         a1_indices=a1,
-        music_indices=music,
-        speech_indices=speech,
+        target_groups={
+            "music": music,
+            "speech": speech,
+            "semantic": semantic,
+            "episodic": episodic,
+        },
+    )
+    first = build_matched_pair_sets(
+        labels=labels,
+        matching_z=matching_z,
         all_declared_indices=declared,
+        pair_name="primary",
+        left_name="music",
+        left_indices=music,
+        right_name="speech",
+        right_indices=speech,
         n_sets=3,
+        random_seed=20260727,
+    )
+    second = build_matched_pair_sets(
+        labels=labels,
+        matching_z=matching_z,
+        all_declared_indices=declared,
+        pair_name="primary",
+        left_name="music",
+        left_indices=music,
+        right_name="speech",
+        right_indices=speech,
+        n_sets=3,
+        random_seed=20260727,
     )
     pd.testing.assert_frame_equal(first, second)
 
     excluded = set(declared.tolist())
     for row in first.itertuples(index=False):
         music_control = np.fromstring(
-            row.music_control_indices, sep=";", dtype=int
+            row.left_control_indices, sep=";", dtype=int
         )
         speech_control = np.fromstring(
-            row.speech_control_indices, sep=";", dtype=int
+            row.right_control_indices, sep=";", dtype=int
         )
-        assert len(music_control) == len(speech_control) == 4
+        assert len(music_control) == len(music)
+        assert len(speech_control) == len(speech)
         assert not excluded.intersection(music_control)
         assert not excluded.intersection(speech_control)
         assert not set(music_control).intersection(speech_control)
-        assert sum(index < 180 for index in music_control) == 2
-        assert sum(index < 180 for index in speech_control) == 2
+        assert sum(index < 180 for index in music_control) == 4
+        assert sum(index < 180 for index in speech_control) == 9
 
 
+DT_NETWORKS = (*DT_CHECK_NETWORKS, "descriptive_context")
 DT_KEYS = list(
     product(
         DT_CHECK_SEVERITIES,
         DT_CHECK_PROBES,
-        ("music", "speech"),
+        DT_NETWORKS,
     )
 )
 
@@ -122,30 +145,40 @@ def test_integration_step_gate_checks_every_endpoint_probe_and_network() -> None
         main_network_df=main,
         reference_network_df=reference,
         main_seed=11,
+        networks=DT_NETWORKS,
     )
 
     assert list(result.columns) == [
         "severity",
         "probe",
         "network",
-        "transfer_dt_1.0ms",
-        "median_target_fit_r_squared_dt_1.0ms",
         "transfer_dt_0.5ms",
         "median_target_fit_r_squared_dt_0.5ms",
+        "transfer_dt_0.25ms",
+        "median_target_fit_r_squared_dt_0.25ms",
         "condition",
+        "required_for_inference",
         "relative_difference",
+        "convergence_passed",
         "fit_r_squared_difference",
     ]
-    assert list(
+    actual_keys = list(
         result[["severity", "probe", "network"]].itertuples(
             index=False, name=None
         )
-    ) == sorted(DT_KEYS)
+    )
+    assert set(actual_keys) == set(DT_KEYS)
+    assert result["required_for_inference"].tolist() == (
+        [True] * (len(DT_CHECK_SEVERITIES) * len(DT_CHECK_PROBES)
+                  * len(DT_CHECK_NETWORKS))
+        + [False] * (len(DT_CHECK_SEVERITIES) * len(DT_CHECK_PROBES))
+    )
     assert result["condition"].tolist() == [
-        SEVERITY_LABELS[severity] for severity, _, _ in sorted(DT_KEYS)
+        SEVERITY_LABELS[severity] for severity, _, _ in actual_keys
     ]
     np.testing.assert_allclose(result["relative_difference"], 0.01)
     np.testing.assert_allclose(result["fit_r_squared_difference"], 0.02)
+    assert result["convergence_passed"].all()
 
 
 def test_integration_step_gate_fails_at_exact_threshold() -> None:
@@ -168,7 +201,36 @@ def test_integration_step_gate_fails_at_exact_threshold() -> None:
             main_network_df=main,
             reference_network_df=reference,
             main_seed=11,
+            networks=DT_NETWORKS,
         )
+
+
+def test_integration_step_descriptive_failure_warns_but_does_not_gate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    main, reference = integration_step_frames()
+    target = (
+        (main["severity"] == 1.0)
+        & (main["probe"] == "5Hz")
+        & (main["network"] == "descriptive_context")
+    )
+    reference_value = reference.loc[
+        (reference["severity"] == 1.0)
+        & (reference["probe"] == "5Hz")
+        & (reference["network"] == "descriptive_context"),
+        "transfer",
+    ].iloc[0]
+    main.loc[target, "transfer"] = reference_value * 1.10
+
+    result = check_integration_step(
+        main_network_df=main,
+        reference_network_df=reference,
+        main_seed=11,
+        networks=DT_NETWORKS,
+    )
+
+    assert (~result["convergence_passed"]).sum() == 1
+    assert "Descriptive context networks" in caplog.text
 
 
 @pytest.mark.parametrize("frame_name", ["main", "reference"])
@@ -201,6 +263,7 @@ def test_integration_step_gate_rejects_missing_coverage(
             main_network_df=main,
             reference_network_df=reference,
             main_seed=11,
+            networks=DT_NETWORKS,
         )
 
 
@@ -225,6 +288,7 @@ def test_integration_step_gate_rejects_duplicate_coverage(
             main_network_df=main,
             reference_network_df=reference,
             main_seed=11,
+            networks=DT_NETWORKS,
         )
 
 
@@ -246,4 +310,5 @@ def test_integration_step_gate_reports_missing_columns(
             main_network_df=main,
             reference_network_df=reference,
             main_seed=11,
+            networks=DT_NETWORKS,
         )

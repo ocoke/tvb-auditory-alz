@@ -31,6 +31,12 @@ NATIVE_THREAD_ENVIRONMENT_VARIABLES = (
     "BLIS_NUM_THREADS",
     "NUMEXPR_NUM_THREADS",
 )
+CPU_ALLOCATION_ENVIRONMENT_VARIABLES = (
+    "SLURM_CPUS_PER_TASK",
+    "NSLOTS",
+    "PBS_NP",
+    "LSB_DJOB_NUMPROC",
+)
 SUPPORTED_JOB_KINDS = frozenset({"simulation", "calibration"})
 WORKER_STARTUP_TIMEOUT_SECONDS = 300.0
 QUEUE_POLL_SECONDS = 0.25
@@ -62,6 +68,14 @@ def configure_native_thread_limits(threads: int = 1) -> dict[str, str]:
 def available_cpu_count() -> int:
     """Return the number of CPUs currently available to this process."""
 
+    sources = cpu_allocation_sources()
+    return min(sources.values())
+
+
+def cpu_allocation_sources() -> dict[str, int]:
+    """Return every valid host, affinity, and scheduler CPU limit."""
+
+    sources = {"os_cpu_count": max(1, int(os.cpu_count() or 1))}
     affinity = getattr(os, "sched_getaffinity", None)
     if affinity is not None:
         try:
@@ -69,8 +83,23 @@ def available_cpu_count() -> int:
         except (OSError, TypeError, ValueError):
             count = 0
         if count > 0:
-            return count
-    return max(1, int(os.cpu_count() or 1))
+            sources["process_affinity"] = count
+    for variable in CPU_ALLOCATION_ENVIRONMENT_VARIABLES:
+        raw_value = os.environ.get(variable)
+        if raw_value is None or not raw_value.strip():
+            continue
+        try:
+            value = int(raw_value)
+        except ValueError as error:
+            raise ValueError(
+                f"{variable} must be a positive integer, got {raw_value!r}."
+            ) from error
+        if value < 1:
+            raise ValueError(
+                f"{variable} must be a positive integer, got {value}."
+            )
+        sources[variable] = value
+    return sources
 
 
 def _resolve_worker_count(worker_count: int | None) -> int:
@@ -91,7 +120,14 @@ def execution_details(worker_count: int | None = None) -> dict[str, Any]:
     available = available_cpu_count()
     resolved = _resolve_worker_count(worker_count)
     return {
-        "multiprocessing_start_method": "spawn",
+        "execution_mode": (
+            "single_process" if resolved == 1 else "process_parallel"
+        ),
+        "parallel_enabled": resolved > 1,
+        "multiprocessing_start_method": (
+            None if resolved == 1 else "spawn"
+        ),
+        "cpu_allocation_sources": cpu_allocation_sources(),
         "available_cpu_count": available,
         "requested_worker_count": worker_count,
         "worker_count": resolved,
@@ -374,6 +410,108 @@ def _worker_main(
                 payload=outcome,
             )
         )
+
+
+class SerialRunner:
+    """Execute the same checkpointable jobs in the current process."""
+
+    worker_count = 1
+
+    def __init__(
+        self,
+        context: Any,
+        run_dir: str | os.PathLike[str],
+    ) -> None:
+        self._context_payload = _plain_context_payload(context)
+        self.run_dir = Path(run_dir).resolve()
+        self._context: Any | None = None
+        self._simulation: Any | None = None
+        self._entered = False
+        self._active_execution = False
+
+    def __enter__(self) -> SerialRunner:
+        if self._entered:
+            raise RuntimeError("SerialRunner cannot be entered more than once")
+        configure_native_thread_limits(1)
+        runtime_root = self.run_dir / ".runtime" / "serial"
+        tvb_home = runtime_root / "tvb"
+        matplotlib_home = runtime_root / "matplotlib"
+        tvb_home.mkdir(parents=True, exist_ok=True)
+        matplotlib_home.mkdir(parents=True, exist_ok=True)
+        os.environ["TVB_USER_HOME"] = str(tvb_home)
+        os.environ["MPLCONFIGDIR"] = str(matplotlib_home)
+
+        from rise_tvb379 import simulation
+
+        simulation.initialize_tvb_runtime()
+        self._simulation = simulation
+        self._context = simulation.SimulationContext(
+            **dict(self._context_payload)
+        )
+        self._entered = True
+        LOGGER.info("Using single-process execution")
+        return self
+
+    def execute(self, jobs: Iterable[WorkerJob]) -> Iterator[WorkerOutcome]:
+        if not self._entered:
+            raise RuntimeError("SerialRunner must be entered before execute")
+        if self._active_execution:
+            raise RuntimeError("SerialRunner already has an active execution")
+        job_list = list(jobs)
+        if not all(isinstance(job, WorkerJob) for job in job_list):
+            raise TypeError("jobs must contain only WorkerJob instances")
+        ordinals = [job.ordinal for job in job_list]
+        if len(set(ordinals)) != len(ordinals):
+            raise ValueError("job ordinals must be unique within one execution")
+        if not job_list:
+            return iter(())
+        self._active_execution = True
+        return self._iterate_outcomes(job_list)
+
+    def _iterate_outcomes(
+        self,
+        jobs: list[WorkerJob],
+    ) -> Iterator[WorkerOutcome]:
+        try:
+            if self._context is None or self._simulation is None:
+                raise RuntimeError("SerialRunner was not initialized")
+            for job in jobs:
+                started = time.perf_counter()
+                if job.kind == "simulation":
+                    result = self._simulation.run_condition_seed_block(
+                        self._context,
+                        **dict(job.payload),
+                    )
+                elif job.kind == "calibration":
+                    result = self._simulation.run_calibration_block(
+                        self._context,
+                        **dict(job.payload),
+                    )
+                else:
+                    raise RuntimeError(
+                        f"unsupported serial job kind: {job.kind}"
+                    )
+                yield WorkerOutcome(
+                    ordinal=job.ordinal,
+                    kind=job.kind,
+                    result=result,
+                    worker_pid=os.getpid(),
+                    elapsed_seconds=time.perf_counter() - started,
+                )
+        finally:
+            self._active_execution = False
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: Any | None,
+    ) -> bool:
+        self._active_execution = False
+        self._entered = False
+        self._context = None
+        self._simulation = None
+        return False
 
 
 class ParallelRunner:
@@ -710,11 +848,14 @@ class ParallelRunner:
 
 
 __all__ = [
+    "CPU_ALLOCATION_ENVIRONMENT_VARIABLES",
     "NATIVE_THREAD_ENVIRONMENT_VARIABLES",
     "ParallelRunner",
+    "SerialRunner",
     "WorkerJob",
     "WorkerOutcome",
     "available_cpu_count",
     "configure_native_thread_limits",
+    "cpu_allocation_sources",
     "execution_details",
 ]

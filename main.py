@@ -23,6 +23,23 @@ PINNED_RUNTIME = {
 }
 
 
+def _parse_worker_option(value: str) -> int | None:
+    normalized = value.strip().lower()
+    if normalized == "auto":
+        return None
+    try:
+        parsed = int(normalized)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "--workers must be 'auto' or a positive integer"
+        ) from error
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(
+            "--workers must be 'auto' or a positive integer"
+        )
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -54,6 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=None,
         help="forbid downloads and require all verified inputs locally",
+    )
+    parser.add_argument(
+        "--workers",
+        type=_parse_worker_option,
+        default=1,
+        metavar="N|auto",
+        help=(
+            "worker processes (default: 1, no multiprocessing; "
+            "use 'auto' for all allocated CPUs)"
+        ),
     )
     parser.add_argument(
         "--resume",
@@ -235,6 +262,7 @@ def _execute_experiment(
     source_records,
     run_manifest: dict[str, Any],
     command_started: float,
+    execution: dict[str, Any],
 ) -> Path:
     from rise_tvb379.data import (
         load_experiment_data,
@@ -245,7 +273,6 @@ def _execute_experiment(
         write_experiment_metadata,
         write_output_tables,
     )
-    from rise_tvb379.parallel import execution_details
     from rise_tvb379.pipeline import (
         build_experiment_metadata,
         run_pipeline,
@@ -256,14 +283,20 @@ def _execute_experiment(
     # every resumable block and final output remains visible and recorded.
     _configure_logging(run_dir)
     logger = logging.getLogger("rise_tvb379")
-    execution = execution_details()
-    logger.info(
-        "Parallel execution: %d worker processes across %d available CPUs; "
-        "one native numerical thread per worker; start method=%s",
-        execution["worker_count"],
-        execution["available_cpu_count"],
-        execution["multiprocessing_start_method"],
-    )
+    if execution["parallel_enabled"]:
+        logger.info(
+            "Optional process parallelism enabled: %d workers across %d "
+            "allocated CPUs; one native numerical thread per worker; "
+            "start method=%s",
+            execution["worker_count"],
+            execution["available_cpu_count"],
+            execution["multiprocessing_start_method"],
+        )
+    else:
+        logger.info(
+            "Single-process execution selected; use --workers auto or "
+            "--workers N to enable process parallelism"
+        )
     data = load_experiment_data(run_dir / "inputs")
     source_manifest_df = source_manifest_dataframe(source_records)
     products = run_pipeline(
@@ -277,14 +310,22 @@ def _execute_experiment(
         calibration_df=products.calibration_df,
         main_normalized_df=products.main_normalized_df,
         primary_endpoint_df=products.primary_endpoint_df,
+        secondary_endpoint_df=products.secondary_endpoint_df,
         counterfactual_comparison_df=(
             products.counterfactual_comparison_df
         ),
+        memory_counterfactual_comparison_df=(
+            products.memory_counterfactual_comparison_df
+        ),
         matched_null_df=products.matched_null_df,
+        memory_matched_null_df=products.memory_matched_null_df,
         main_seed=config.seeds[0],
         sensitivity_endpoint_df=products.sensitivity_endpoint_df,
         shuffle_contrast_df=products.shuffle_contrast_df,
         observed_first_seed_df=products.observed_first_seed_df,
+        memory_observed_first_seed_df=(
+            products.memory_observed_first_seed_df
+        ),
         periodic_probes=config.periodic_probes,
         figure_dir=run_dir / "results" / "figures",
     )
@@ -416,6 +457,7 @@ def _run_new(
             source_records=source_records,
             run_manifest=run_manifest,
             command_started=command_started,
+            execution=environment["execution"],
         )
     print(f"Completed run: {run_dir}")
     print(f"Result archive: {archive_path}")
@@ -469,6 +511,7 @@ def _run_resume(
             source_records=source_records,
             run_manifest=run_manifest,
             command_started=command_started,
+            execution=environment["execution"],
         )
     print(f"Completed resumed run: {run_dir}")
     print(f"Result archive: {archive_path}")
@@ -480,13 +523,29 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         from rise_tvb379.parallel import (
+            available_cpu_count,
             configure_native_thread_limits,
             execution_details,
         )
 
         configure_native_thread_limits(1)
         environment = _preflight_runtime()
-        environment["execution"] = execution_details()
+        available_workers = available_cpu_count()
+        requested_workers = args.workers
+        resolved_workers = (
+            available_workers
+            if requested_workers is None
+            else min(requested_workers, available_workers)
+        )
+        execution = execution_details(resolved_workers)
+        execution["requested_worker_count"] = (
+            "auto" if requested_workers is None else requested_workers
+        )
+        execution["worker_count_capped_to_allocation"] = (
+            requested_workers is not None
+            and requested_workers > available_workers
+        )
+        environment["execution"] = execution
         if args.resume is not None:
             return _run_resume(
                 args,

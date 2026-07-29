@@ -9,8 +9,10 @@ import numpy as np
 import pytest
 
 from rise_tvb379.data import (
+    ALL_ROI_LABELS,
     EDUCASE_COMMIT,
     EXPECTED_ANCHORS,
+    NETWORK_LABELS,
     PIPELINE_COMMIT,
     SOURCE_SPECS,
     DataValidationError,
@@ -33,10 +35,25 @@ def _aligned_labels() -> np.ndarray:
         + [f"R_region_{index}" for index in range(180)]
         + [f"Subcortical_{index}" for index in range(18)]
         + ["Brainstem"],
-        dtype=str,
+        dtype=object,
     )
     for label, index in EXPECTED_ANCHORS.items():
         labels[index] = label
+    reserved = set(EXPECTED_ANCHORS.values())
+    available_left = iter(index for index in range(180) if index not in reserved)
+    available_right = iter(
+        index for index in range(180, 360) if index not in reserved
+    )
+    available_subcortical = iter(range(360, 378))
+    for label in ALL_ROI_LABELS:
+        if label in EXPECTED_ANCHORS:
+            continue
+        if label.startswith("L_"):
+            labels[next(available_left)] = label
+        elif label.startswith("R_"):
+            labels[next(available_right)] = label
+        else:
+            labels[next(available_subcortical)] = label
     return labels
 
 
@@ -196,9 +213,17 @@ def test_alignment_and_roi_validation() -> None:
 
     rois = build_roi_definitions(validation.label_to_index)
     assert rois.a1_indices.tolist() == [23, 203]
-    assert rois.music_indices.tolist() == [43, 223, 39, 219]
-    assert rois.speech_indices.tolist() == [128, 308, 73, 253]
-    assert len(rois.definition_df) == 10
+    assert len(rois.music_indices) == 8
+    assert len(rois.speech_indices) == 14
+    assert len(rois.semantic_memory_indices) == 5
+    assert len(rois.episodic_memory_indices) == 4
+    assert len(rois.network_indices) == len(NETWORK_LABELS) == 17
+    assert len(rois.definition_df) == 116
+    assert len(rois.peak_mapping_df) == 9
+    assert set(rois.music_indices).isdisjoint(rois.speech_indices)
+    assert set(rois.semantic_memory_indices).isdisjoint(
+        rois.episodic_memory_indices
+    )
     assert not rois.all_declared_indices.flags.writeable
 
 
@@ -263,8 +288,8 @@ def test_load_experiment_data_returns_pipeline_tables(tmp_path: Path) -> None:
     assert loaded.label_to_index["R_A1"] == 203
     assert loaded.baseline_b.shape == (379,)
     assert loaded.high_b.shape == (379,)
-    assert loaded.roi_definition_df.shape[0] == 10
-    assert loaded.roi_pathology_df.shape[0] == 10
+    assert loaded.roi_definition_df.shape[0] == 116
+    assert loaded.roi_pathology_df.shape[0] == 116
     assert loaded.pathology_summary_df["severity"].tolist() == [0.0, 0.5, 1.0]
     assert not loaded.weights.flags.writeable
     assert not loaded.labels.flags.writeable

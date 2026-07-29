@@ -14,8 +14,8 @@ RunMode = Literal["smoke", "pilot", "final"]
 N_REGIONS = 379
 MAIN_GLOBAL_COUPLING = 60.0
 MAIN_INPUT_PEAK_PER_MS = 0.02
-MAIN_DT_MS = 1.0
-REFERENCE_DT_MS = 0.5
+MAIN_DT_MS = 0.5
+REFERENCE_DT_MS = 0.25
 MONITOR_PERIOD_MS = 2.0
 
 STIMULUS_ONSET_MS = 2500.0
@@ -28,6 +28,14 @@ PROBES = ("pulse", "2Hz", "5Hz")
 PERIODIC_PROBES = ("2Hz", "5Hz")
 DT_CHECK_SEVERITIES = (0.0, 1.0)
 DT_CHECK_PROBES = PERIODIC_PROBES
+DT_CHECK_NETWORKS = (
+    "music",
+    "speech",
+    "music_semantic_task_associated",
+    "music_episodic_task_associated",
+    "shared_auditory_relay",
+)
+DT_RELATIVE_TOLERANCE = 0.05
 SEVERITY_LABELS = MappingProxyType(
     {
         0.0: "Baseline",
@@ -154,6 +162,8 @@ class ExperimentConfig:
     periodic_probes: tuple[str, ...] = PERIODIC_PROBES
     dt_check_severities: tuple[float, ...] = DT_CHECK_SEVERITIES
     dt_check_probes: tuple[str, ...] = DT_CHECK_PROBES
+    dt_check_networks: tuple[str, ...] = DT_CHECK_NETWORKS
+    dt_relative_tolerance: float = DT_RELATIVE_TOLERANCE
     download_results_at_end: bool = False
 
     def __post_init__(self) -> None:
@@ -165,6 +175,10 @@ class ExperimentConfig:
             raise ValueError(f"This experiment requires exactly {N_REGIONS} regions.")
         if self.main_dt_ms <= 0 or self.reference_dt_ms <= 0:
             raise ValueError("Integration steps must be positive.")
+        if self.reference_dt_ms >= self.main_dt_ms:
+            raise ValueError(
+                "Reference integration step must be smaller than the main step."
+            )
         for step in (self.main_dt_ms, self.reference_dt_ms):
             ratio = self.monitor_period_ms / step
             if abs(ratio - round(ratio)) > 1e-12:
@@ -182,6 +196,18 @@ class ExperimentConfig:
         if not set(self.dt_check_probes).issubset(self.periodic_probes):
             raise ValueError(
                 "Integration-step probes must be periodic probes."
+            )
+        if (
+            not self.dt_check_networks
+            or len(set(self.dt_check_networks))
+            != len(self.dt_check_networks)
+        ):
+            raise ValueError(
+                "Integration-step networks must be non-empty and unique."
+            )
+        if self.dt_relative_tolerance <= 0.0:
+            raise ValueError(
+                "Integration-step relative tolerance must be positive."
             )
 
     @property
@@ -286,7 +312,7 @@ def workload_counts(config: ExperimentConfig | ModeConfig) -> WorkloadCounts:
 
     calibration = len(mode.calibration_couplings) * 2
     main = len(mode.severities) * len(mode.seeds) * (1 + len(probes))
-    local_counterfactual = len(mode.seeds) * (1 + len(probes))
+    local_counterfactual = 2 * len(mode.seeds) * (1 + len(probes))
     sensitivity = (
         len(mode.sensitivity_scenarios)
         * 2
@@ -345,6 +371,8 @@ def config_to_dict(config: ExperimentConfig) -> dict[str, Any]:
             "periodic_probes": list(config.periodic_probes),
             "dt_check_severities": list(config.dt_check_severities),
             "dt_check_probes": list(config.dt_check_probes),
+            "dt_check_networks": list(config.dt_check_networks),
+            "dt_relative_tolerance": config.dt_relative_tolerance,
             "severity_labels": [
                 {"severity": severity, "label": label}
                 for severity, label in SEVERITY_LABELS.items()

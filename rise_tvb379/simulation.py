@@ -24,8 +24,7 @@ class SimulationContext:
     weights: np.ndarray
     labels: np.ndarray
     a1_indices: np.ndarray
-    music_indices: np.ndarray
-    speech_indices: np.ndarray
+    network_indices: dict[str, np.ndarray]
     n_regions: int
     monitor_period_ms: float
     stimulus_onset_ms: float
@@ -33,14 +32,6 @@ class SimulationContext:
     pulse_width_ms: float
     pulse_analysis_end_ms: float
     default_simulation_ms: float
-
-    @property
-    def network_indices(self) -> dict[str, np.ndarray]:
-        return {
-            "music": self.music_indices,
-            "speech": self.speech_indices,
-        }
-
 
 @dataclass
 class BlockResult:
@@ -340,8 +331,8 @@ def run_calibration_block(
         n_regions=context.n_regions,
     )
     a1 = float(np.mean(response[context.a1_indices]))
-    music = float(np.mean(response[context.music_indices]))
-    speech = float(np.mean(response[context.speech_indices]))
+    music = float(np.mean(response[context.network_indices["music"]]))
+    speech = float(np.mean(response[context.network_indices["speech"]]))
     frame = pd.DataFrame(
         [
             {
