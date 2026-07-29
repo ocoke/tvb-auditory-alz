@@ -309,6 +309,67 @@ The final ZIP contains the scientific outputs, metadata, run log, resolved
 configuration/environment provenance, and verified input copies. Internal
 restart checkpoints are intentionally excluded.
 
+## Analyzing a completed final run
+
+`analyze_results.py` is a read-only post-processing command for an existing
+completed run. It does not import TVB or execute any simulations, and it never
+changes the original result tables or experiment figures. By default it reads
+the supplied final run and writes supplemental analysis beneath that run:
+
+```bash
+python analyze_results.py
+python analyze_results.py \
+  --run-dir runs/RISE_TVB379_results_final
+```
+
+The default produces both a concise publication/poster set and a denser
+technical-QA set in PNG and SVG at 300 DPI. Select an audience, image format,
+resolution, or separate destination when needed:
+
+```bash
+python analyze_results.py --audience publication --formats svg
+python analyze_results.py --audience technical --formats png --dpi 200
+python analyze_results.py \
+  --run-dir /path/to/completed-run \
+  --output-dir /path/to/analysis
+```
+
+The output layout is:
+
+```text
+analysis/
+├── publication/figures/       eight paper/poster figures
+├── technical_qa/figures/      six detailed diagnostic figures
+├── tables/                    eleven derived CSV summaries
+├── interpretation_findings.csv
+└── figure_manifest.csv
+```
+
+The derived tables cover completeness and scientific-key validation, component
+and contrast trajectories, high endpoints, local-fixing attenuation, matched
+controls, spatial shuffles, parameter sensitivity, full-network integration
+step convergence, harmonic-fit quality, calibration, and runtime/worker
+diagnostics. `interpretation_findings.csv` keeps each finding, supporting
+evidence, caveat, and source table in separate columns. The command also prints
+separate `Scientific findings` and `Technical cautions` sections; it does not
+create a Markdown or HTML report.
+
+Before creating the output directory, the analyzer verifies required files and
+columns, finite analysis values, unique scientific keys, configured
+seeds/probes/severities, 100 final shuffles, 430 manifested simulations, 442
+total TVB calls, the PSP safety bound, and the prespecified inferential
+integration-step convergence gate. An incomplete or failed run is rejected
+before plotting.
+
+The supplemental analysis preserves the experiment's interpretation limits.
+In particular, component changes are reported separately from contrasts;
+numerical seeds are not treated as participants; matched and shuffled ranks are
+descriptive simulation diagnostics rather than clinical p-values; and collapse
+under local fixing is described as model-internal dependence rather than
+biological causality. A low harmonic-fit R² is prominently retained as a signal
+quality warning, even when the independent integration-step convergence gate
+passed.
+
 ## Scientific interpretation
 
 The public high endpoint is an artificial amyloid surrogate derived from noise
