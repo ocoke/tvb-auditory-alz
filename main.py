@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the canonical ScienceReady TVB379 experiment without Jupyter."""
+"""Run the canonical DTGateFixed TVB379 experiment without Jupyter."""
 
 from __future__ import annotations
 
@@ -44,9 +44,10 @@ def _worker_count(value: str) -> int | None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the canonical ScienceReady 379-region semantic-versus-"
+            "Run the canonical DTGateFixed 379-region semantic-versus-"
             "episodic musical-memory proxy experiment. The default is the "
-            "locked 626-call final workload."
+            "locked 762-call final workload with 40 integration-step work "
+            "units."
         )
     )
     parser.add_argument(
@@ -95,14 +96,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         metavar="RUN_DIR",
-        help="resume one compatible incomplete ScienceReady run",
+        help="resume one compatible incomplete DTGateFixed run",
     )
     parser.add_argument(
         "--status",
         type=Path,
         default=None,
         metavar="RUN_DIR",
-        help="print the saved status of a ScienceReady run and exit",
+        help="print the saved status of a DTGateFixed run and exit",
     )
     return parser
 
@@ -192,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     validation = validate_notebook()
     print(format_validation_summary(validation), flush=True)
     if args.check:
-        print("Static ScienceReady smoke check passed; no TVB calls ran.")
+        print("Static DTGateFixed smoke check passed; no TVB calls ran.")
         return 0
 
     resume_dir = (

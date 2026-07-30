@@ -46,8 +46,24 @@ def test_canonical_notebook_identity_structure_and_scope() -> None:
     assert revision["speech_confirmatory_analysis_removed"] is True
     assert revision["semantic_expanded_nodes"] == 13
     assert revision["episodic_expanded_nodes"] == 19
-    assert validation.csv_output_count == 42
+    amendment = validation.notebook["metadata"][
+        "rise_protocol_amendment"
+    ]
+    assert amendment["date"] == "2026-07-30"
+    assert amendment["name"] == "integration-step interaction gate"
+    assert amendment["final_reference_seed_count"] == 20
+    assert amendment["planned_final_tvb_calls"] == 762
+    assert validation.csv_output_count == 45
     assert validation.figure_output_count == 6
+    notebook_code = "\n".join(
+        source for _, source in validation.code_cells
+    )
+    for diagnostic_output in (
+        "integration_step_interaction_seed_diagnostics.csv",
+        "integration_step_a1_snr_seed_diagnostics.csv",
+        "integration_step_raw_metric_seed_diagnostics.csv",
+    ):
+        assert diagnostic_output in notebook_code
 
 
 def test_canonical_code_is_clean_and_outputs_are_cleared() -> None:
@@ -81,6 +97,7 @@ def test_locked_workload_counts() -> None:
         manifested_calls=32,
         calibration_calls=2,
         main_calls=8,
+        integration_step_blocks=2,
         integration_step_calls=8,
         local_counterfactual_calls=4,
         parameter_sensitivity_calls=6,
@@ -91,17 +108,19 @@ def test_locked_workload_counts() -> None:
         manifested_calls=79,
         calibration_calls=6,
         main_calls=24,
+        integration_step_blocks=2,
         integration_step_calls=8,
         local_counterfactual_calls=8,
         parameter_sensitivity_calls=24,
         spatial_shuffle_calls=15,
     )
     assert workloads["final"] == Workload(
-        total_calls=626,
-        manifested_calls=614,
+        total_calls=762,
+        manifested_calls=750,
         calibration_calls=12,
         main_calls=240,
-        integration_step_calls=24,
+        integration_step_blocks=40,
+        integration_step_calls=160,
         local_counterfactual_calls=80,
         parameter_sensitivity_calls=120,
         spatial_shuffle_calls=150,
@@ -138,7 +157,8 @@ def test_check_path_never_executes_notebook(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "run_notebook", fail_if_called)
     assert main.main(["--check"]) == 0
     output = capsys.readouterr().out
-    assert "final: 626 total calls (614 manifested)" in output
+    assert "final: 762 total calls (750 manifested)" in output
+    assert "integration step 40 work units / 160 calls" in output
     assert "no TVB calls ran" in output
 
 
@@ -201,6 +221,7 @@ def test_interrupted_dispatch_resumes_only_unfinished_work(
         code_sha256="code",
         environment=environment,
         planned_total_tvb_calls=3,
+        planned_integration_step_work_units=0,
         worker_processes=1,
     )
     namespace = {
@@ -235,6 +256,7 @@ def test_interrupted_dispatch_resumes_only_unfinished_work(
         code_sha256="code",
         environment=environment,
         planned_total_tvb_calls=3,
+        planned_integration_step_work_units=0,
         worker_processes=1,
     )
     resumed_dispatcher = CheckpointDispatcher(namespace, resumed)
@@ -270,6 +292,7 @@ def test_resume_refuses_environment_mismatch(tmp_path: Path) -> None:
         code_sha256="code",
         environment={"python": "3.12.8"},
         planned_total_tvb_calls=3,
+        planned_integration_step_work_units=0,
         worker_processes=1,
     )
     controller.mark_failed(RuntimeError("stop"))
@@ -285,6 +308,7 @@ def test_resume_refuses_environment_mismatch(tmp_path: Path) -> None:
             code_sha256="code",
             environment={"python": "3.12.9"},
             planned_total_tvb_calls=3,
+            planned_integration_step_work_units=0,
             worker_processes=1,
         )
 
@@ -299,6 +323,7 @@ def test_damaged_checkpoint_is_recomputed(tmp_path: Path) -> None:
         code_sha256="code",
         environment=environment,
         planned_total_tvb_calls=2,
+        planned_integration_step_work_units=0,
         worker_processes=1,
     )
     namespace = {
@@ -333,6 +358,7 @@ def test_damaged_checkpoint_is_recomputed(tmp_path: Path) -> None:
         code_sha256="code",
         environment=environment,
         planned_total_tvb_calls=2,
+        planned_integration_step_work_units=0,
         worker_processes=1,
     )
     second_executed: list[int] = []
@@ -354,6 +380,46 @@ def test_damaged_checkpoint_is_recomputed(tmp_path: Path) -> None:
     ).read_text(encoding="utf-8")
 
 
+def test_dt_gate_checkpoint_accounting_is_40_units_and_160_calls(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "results_dt_gate"
+    controller = RunController.create(
+        run_dir=run_dir,
+        mode="final",
+        notebook_sha256="notebook",
+        code_sha256="code",
+        environment={"python": "test"},
+        planned_total_tvb_calls=762,
+        planned_integration_step_work_units=40,
+        worker_processes=1,
+    )
+    namespace = {
+        "joblib": _PickleJoblib,
+        "PARALLEL_WORKERS": 1,
+    }
+    jobs = [
+        {
+            "ordinal": ordinal,
+            "probes": ("pulse", "2Hz", "5Hz"),
+        }
+        for ordinal in range(40)
+    ]
+
+    outcomes = CheckpointDispatcher(namespace, controller)(
+        lambda job: {"ordinal": job["ordinal"]},
+        jobs,
+        (),
+        "dt_reference_0.25ms condition-seed blocks",
+    )
+
+    assert len(outcomes) == 40
+    status = read_run_status(run_dir)
+    assert status["planned_total_tvb_calls"] == 762
+    assert status["planned_integration_step_work_units"] == 40
+    assert status["completed_tvb_calls"] == 160
+
+
 def test_status_cli_reads_status_without_starting_run(
     tmp_path: Path,
     capsys,
@@ -366,6 +432,7 @@ def test_status_cli_reads_status_without_starting_run(
         code_sha256="code",
         environment={"python": "test"},
         planned_total_tvb_calls=34,
+        planned_integration_step_work_units=2,
         worker_processes=1,
     )
     capsys.readouterr()
@@ -375,3 +442,4 @@ def test_status_cli_reads_status_without_starting_run(
     output = capsys.readouterr().out
     assert "State: running" in output
     assert "TVB progress: 0/34 calls (0.0%)" in output
+    assert "Integration-step plan: 2 work units" in output

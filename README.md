@@ -1,8 +1,8 @@
-# RISE TVB379 ScienceReady semantic-versus-episodic experiment
+# RISE TVB379 DTGateFixed semantic-versus-episodic experiment
 
 This repository runs the final 379-region TVB semantic-versus-episodic
 musical-memory proxy experiment from
-[`RISE_TVB379_Semantic_Episodic_Final_ScienceReady_20260729.ipynb`](notebooks/RISE_TVB379_Semantic_Episodic_Final_ScienceReady_20260729.ipynb).
+[`RISE_TVB379_Semantic_Episodic_Final_DTGateFixed_20260730.ipynb`](notebooks/RISE_TVB379_Semantic_Episodic_Final_DTGateFixed_20260730.ipynb).
 
 The notebook is the single scientific source. `main.py` validates its exact
 identity, compiles all 18 code cells, and executes those cells in their
@@ -64,13 +64,14 @@ python main.py --mode final --workers auto
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `smoke` | 2 | 8 | 8 | 4 | 6 | 6 | 34 |
 | `pilot` | 6 | 24 | 8 | 8 | 24 | 15 | 85 |
-| `final` | 12 | 240 | 24 | 80 | 120 | 150 | **626** |
+| `final` | 12 | 240 | 160 | 80 | 120 | 150 | **762** |
 
 Final mode uses 20 paired numerical initializations, 50 spatial shuffles,
 500 matched parcel-set controls, three severity values, and pulse/2 Hz/5 Hz
-probes. Of its 626 calls, 614 are in `run_manifest.csv`; the 12 calibration
+probes. Of its 762 calls, 750 are in `run_manifest.csv`; the 12 calibration
 calls are recorded separately because each calibration row contains a control
-and pulse simulation.
+and pulse simulation. The integration-step stage contains 40 endpoint
+condition/seed work units and 160 TVB calls.
 
 The five pinned input files in `data/` are used as a verified local cache by
 default. Select another cache or result name with:
@@ -141,11 +142,11 @@ python main.py --status /path/to/results_dir
 ```
 
 `run_status.json` is atomically updated after every durable work unit and
-records the state, attempt, current stage, completed/planned TVB calls,
-restored/executed calls for the current attempt, environment, input hashes,
-completed source cells, timestamps, and any error. `progress.log` contains the
-same stage-level progress messages, percentages, elapsed time, and ETA shown in
-the terminal.
+records the state, attempt, current stage, completed/planned TVB calls, the
+40-unit final integration-step plan, restored/executed calls for the current
+attempt, environment, input hashes, completed source cells, timestamps, and any
+error. `progress.log` contains the same stage-level progress messages,
+percentages, elapsed time, and ETA shown in the terminal.
 
 ## Progress and static smoke check
 
@@ -155,7 +156,7 @@ calls, percentage, elapsed time, and an ETA after newly executed work is
 available. Worker processes use private TVB and Matplotlib runtime directories.
 
 Validate the notebook identity, 40-cell/18-code-cell structure, compilation,
-ScienceReady metadata, 6000 ms pulse window, and all locked workload counts
+DTGateFixed metadata, 6000 ms pulse window, and all locked workload counts
 without importing TVB or starting a simulation:
 
 ```bash
@@ -188,17 +189,21 @@ stimulus-induced functional connectivity, and relative pulse-response latency.
 The required preflight covers seeds 11 and 23 at baseline and high
 perturbation. It applies the locked transfer, functional-connectivity, and
 latency gates before the remaining main blocks. The integration-step check
-compares 0.5 ms with 0.25 ms for seeds 11, 71, and 503 at both endpoints and
-all three probes. Pulse analysis extends through 6000 ms.
+compares 0.5 ms with 0.25 ms for all 20 final numerical seeds at both
+endpoints and all three probes. This produces 40 condition/seed work units.
+Its interaction gate evaluates matching direction, tolerance, and 95% interval
+conclusions while retaining the seed-level raw differences as diagnostics.
+Pulse analysis extends through 6000 ms.
 
 ## Outputs
 
-A completed run writes 42 CSV tables, including:
+A completed run writes 45 CSV tables, including:
 
 - source, data-quality, parcel-definition, evidence, mapping, and pathology
   tables;
 - calibration, node, network, normalized, interaction, and statistics tables;
 - preflight, eligibility, A1 frequency, temporal, and integration-step QA;
+- interaction, A1-SNR, and raw-metric seed-level integration-step diagnostics;
 - local-dynamics-fixed counterfactual outputs;
 - matched-control sets, null metrics, and summaries;
 - parameter and laterality sensitivity outputs;

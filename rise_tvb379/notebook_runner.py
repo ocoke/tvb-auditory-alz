@@ -1,4 +1,4 @@
-"""Validation and direct execution of the canonical ScienceReady notebook.
+"""Validation and direct execution of the canonical DTGateFixed notebook.
 
 The experiment intentionally has one scientific implementation: the code cells
 in the canonical notebook.  This module provides only the non-scientific
@@ -27,10 +27,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_NOTEBOOK = (
     PROJECT_ROOT
     / "notebooks"
-    / "RISE_TVB379_Semantic_Episodic_Final_ScienceReady_20260729.ipynb"
+    / "RISE_TVB379_Semantic_Episodic_Final_DTGateFixed_20260730.ipynb"
 )
 CANONICAL_SHA256 = (
-    "d4f6f0b4cf33575c86912368d22a9bd4c6e8567959e23cee1f3058f9ec85e907"
+    "c581e82979e158690a7689cca89426818fb2eaa146f9309aa5613d8897e3b92e"
 )
 EXPECTED_CELL_COUNT = 40
 EXPECTED_CODE_CELL_COUNT = 18
@@ -38,7 +38,7 @@ EXPECTED_REVISION = "semantic_episodic_final_v3_science_ready"
 EXPECTED_WORKLOADS = {
     "smoke": (34, 32),
     "pilot": (85, 79),
-    "final": (626, 614),
+    "final": (762, 750),
 }
 
 
@@ -50,6 +50,7 @@ class Workload:
     manifested_calls: int
     calibration_calls: int
     main_calls: int
+    integration_step_blocks: int
     integration_step_calls: int
     local_counterfactual_calls: int
     parameter_sensitivity_calls: int
@@ -148,11 +149,10 @@ def _resolved_workloads(configuration: dict[str, Any]) -> dict[str, Workload]:
             * len(mode_config["seeds"])
             * probes_per_block
         )
-        integration_step = (
-            2
-            * len(mode_config["dt_check_seeds"])
-            * probes_per_block
+        integration_step_blocks = 2 * len(
+            mode_config["dt_check_seeds"]
         )
+        integration_step = integration_step_blocks * probes_per_block
         local_counterfactual = (
             len(mode_config["seeds"]) * probes_per_block
         )
@@ -178,6 +178,7 @@ def _resolved_workloads(configuration: dict[str, Any]) -> dict[str, Workload]:
             manifested_calls=manifested,
             calibration_calls=calibration,
             main_calls=main,
+            integration_step_blocks=integration_step_blocks,
             integration_step_calls=integration_step,
             local_counterfactual_calls=local_counterfactual,
             parameter_sensitivity_calls=parameter_sensitivity,
@@ -259,6 +260,28 @@ def validate_notebook(
                 f"Canonical notebook revision field {key!r} must be "
                 f"{expected!r}."
             )
+    amendment = notebook.get("metadata", {}).get(
+        "rise_protocol_amendment",
+        {},
+    )
+    required_amendment_values = {
+        "date": "2026-07-30",
+        "name": "integration-step interaction gate",
+        "source_sha256": (
+            "d4f6f0b4cf33575c86912368d22a9bd4c6e8567959e23cee1f3058f9ec85e907"
+        ),
+        "main_dt_ms": 0.5,
+        "reference_dt_ms": 0.25,
+        "final_reference_seed_count": 20,
+        "planned_final_tvb_calls": 762,
+        "requires_matching_95pct_interval_conclusion": True,
+    }
+    for key, expected in required_amendment_values.items():
+        if amendment.get(key) != expected:
+            raise ValueError(
+                f"Canonical protocol-amendment field {key!r} must be "
+                f"{expected!r}."
+            )
 
     code_cells = tuple(_code_cells(notebook))
     if len(code_cells) != EXPECTED_CODE_CELL_COUNT:
@@ -291,9 +314,9 @@ def validate_notebook(
             f"expected {EXPECTED_WORKLOADS}, got {actual_counts}."
         )
     csv_output_count, figure_output_count = _output_counts(complete_source)
-    if csv_output_count != 42 or figure_output_count != 6:
+    if csv_output_count != 45 or figure_output_count != 6:
         raise ValueError(
-            "Locked output mismatch: expected 42 CSV tables and 6 figures, "
+            "Locked output mismatch: expected 45 CSV tables and 6 figures, "
             f"got {csv_output_count} CSV tables and {figure_output_count} "
             "figures."
         )
@@ -311,7 +334,7 @@ def validate_notebook(
 
 def format_validation_summary(validation: NotebookValidation) -> str:
     lines = [
-        "Canonical ScienceReady notebook validated:",
+        "Canonical DTGateFixed notebook validated:",
         f"  path: {validation.path}",
         f"  SHA-256: {validation.sha256}",
         (
@@ -328,7 +351,9 @@ def format_validation_summary(validation: NotebookValidation) -> str:
         workload = validation.workloads[mode]
         lines.append(
             f"    {mode}: {workload.total_calls} total calls "
-            f"({workload.manifested_calls} manifested)"
+            f"({workload.manifested_calls} manifested); integration step "
+            f"{workload.integration_step_blocks} work units / "
+            f"{workload.integration_step_calls} calls"
         )
     return "\n".join(lines)
 
@@ -403,6 +428,11 @@ def run_notebook(
                     "environment": environment,
                     "planned_total_tvb_calls": (
                         validation.workloads[mode].total_calls
+                    ),
+                    "planned_integration_step_work_units": (
+                        validation.workloads[
+                            mode
+                        ].integration_step_blocks
                     ),
                     "worker_processes": int(
                         namespace["PARALLEL_WORKERS"]

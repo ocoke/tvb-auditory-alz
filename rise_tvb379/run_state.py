@@ -116,6 +116,11 @@ def format_run_status(run_dir: Path, status: Mapping[str, Any]) -> str:
             f"TVB progress: {completed}/{planned} calls "
             f"({percent:.1f}%)"
         ),
+        (
+            "Integration-step plan: "
+            f"{status.get('planned_integration_step_work_units', 0)} "
+            "work units"
+        ),
         f"Current stage: {status.get('current_stage') or 'none'}",
         f"Attempt: {status.get('attempt', 0)}",
         f"Updated: {status.get('updated_utc', 'unknown')}",
@@ -211,6 +216,7 @@ class RunController:
         code_sha256: str,
         environment: Mapping[str, Any],
         planned_total_tvb_calls: int,
+        planned_integration_step_work_units: int,
         worker_processes: int,
     ) -> "RunController":
         run_dir = run_dir.resolve()
@@ -231,6 +237,9 @@ class RunController:
             "execution_code_sha256": code_sha256,
             "environment": dict(environment),
             "planned_total_tvb_calls": int(planned_total_tvb_calls),
+            "planned_integration_step_work_units": int(
+                planned_integration_step_work_units
+            ),
             "completed_tvb_calls": 0,
             "completed_work": {},
             "restored_tvb_calls_this_attempt": 0,
@@ -271,6 +280,7 @@ class RunController:
         code_sha256: str,
         environment: Mapping[str, Any],
         planned_total_tvb_calls: int,
+        planned_integration_step_work_units: int,
         worker_processes: int,
     ) -> "RunController":
         run_dir = run_dir.resolve()
@@ -292,6 +302,10 @@ class RunController:
             planned_total_tvb_calls
         ):
             mismatches.append("resolved TVB workload")
+        if int(
+            status.get("planned_integration_step_work_units", -1)
+        ) != int(planned_integration_step_work_units):
+            mismatches.append("integration-step work-unit plan")
         if mismatches:
             raise RunStateError(
                 "Resume refused because compatibility checks differ: "
