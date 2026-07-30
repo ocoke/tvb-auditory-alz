@@ -1,569 +1,251 @@
 #!/usr/bin/env python3
-"""Command-line entry point for the direct-run RISE TVB379 experiment."""
+"""Run the canonical ScienceReady TVB379 experiment without Jupyter."""
 
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 from pathlib import Path
 import sys
-import time
-from typing import Any
+
+from rise_tvb379.notebook_runner import (
+    format_validation_summary,
+    run_notebook,
+    validate_notebook,
+)
+from rise_tvb379.run_state import (
+    RunStateError,
+    format_run_status,
+    read_run_status,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-PINNED_RUNTIME = {
-    "numpy": "2.0.2",
-    "pandas": "2.2.2",
-    "scipy": "1.16.3",
-    "matplotlib": "3.11.1",
-    "tvb-library": "2.10.0",
-    "tvb-data": "3.0.0",
-}
+DEFAULT_DATA_CACHE = PROJECT_ROOT / "data"
 
 
-def _parse_worker_option(value: str) -> int | None:
+def _worker_count(value: str) -> int | None:
     normalized = value.strip().lower()
     if normalized == "auto":
         return None
     try:
-        parsed = int(normalized)
+        count = int(normalized)
     except ValueError as error:
         raise argparse.ArgumentTypeError(
-            "--workers must be 'auto' or a positive integer"
+            "workers must be 'auto' or a positive integer"
         ) from error
-    if parsed < 1:
+    if count < 1:
         raise argparse.ArgumentTypeError(
-            "--workers must be 'auto' or a positive integer"
+            "workers must be 'auto' or a positive integer"
         )
-    return parsed
+    return count
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the 379-region RISE TVB experiment. With no arguments this "
-            "starts final mode, configured for 100 spatial shuffles if the "
-            "required convergence gate passes."
+            "Run the canonical ScienceReady 379-region semantic-versus-"
+            "episodic musical-memory proxy experiment. The default is the "
+            "locked 626-call final workload."
         )
     )
     parser.add_argument(
         "--mode",
         choices=("smoke", "pilot", "final"),
         default=None,
-        help="new-run workload (default: final)",
-    )
-    parser.add_argument(
-        "--output-root",
-        type=Path,
-        default=None,
-        help=f"new-run parent directory (default: {PROJECT_ROOT / 'runs'})",
-    )
-    parser.add_argument(
-        "--data-dir",
-        type=Path,
-        default=None,
-        help=f"verified input cache (default: {PROJECT_ROOT / 'data'})",
-    )
-    parser.add_argument(
-        "--offline",
-        action="store_true",
-        default=None,
-        help="forbid downloads and require all verified inputs locally",
+        help="notebook workload (default: final)",
     )
     parser.add_argument(
         "--workers",
-        type=_parse_worker_option,
-        default=1,
+        type=_worker_count,
+        default=None,
         metavar="N|auto",
         help=(
-            "worker processes (default: 1, no multiprocessing; "
-            "use 'auto' for all allocated CPUs)"
+            "parallel worker processes; 'auto' uses the detected CPU "
+            "allocation (default: auto)"
+        ),
+    )
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help=(
+            "optional result-directory suffix; the notebook otherwise uses "
+            "semantic_episodic_v3_<mode>"
+        ),
+    )
+    parser.add_argument(
+        "--data-cache",
+        type=Path,
+        default=DEFAULT_DATA_CACHE,
+        help=(
+            "directory containing the five pinned source files "
+            f"(default: {DEFAULT_DATA_CACHE})"
+        ),
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "validate and compile all canonical notebook code cells, print "
+            "the locked workloads, and exit without running TVB"
         ),
     )
     parser.add_argument(
         "--resume",
         type=Path,
         default=None,
-        help="explicitly resume one compatible incomplete run directory",
+        metavar="RUN_DIR",
+        help="resume one compatible incomplete ScienceReady run",
+    )
+    parser.add_argument(
+        "--status",
+        type=Path,
+        default=None,
+        metavar="RUN_DIR",
+        help="print the saved status of a ScienceReady run and exit",
     )
     return parser
 
 
-def parse_args(
-    argv: list[str] | None = None,
-    *,
-    parser: argparse.ArgumentParser | None = None,
-) -> argparse.Namespace:
-    parser = parser or build_parser()
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.resume is not None:
-        conflicting = [
-            flag
-            for flag, value in (
+        conflicts = [
+            name
+            for name, value in (
                 ("--mode", args.mode),
-                ("--output-root", args.output_root),
-                ("--data-dir", args.data_dir),
-                ("--offline", args.offline),
+                ("--run-id", args.run_id),
+                ("--check", args.check),
+                ("--status", args.status),
             )
-            if value is not None
+            if value is not None and value is not False
         ]
-        if conflicting:
+        if conflicts:
             parser.error(
-                "--resume is mutually exclusive with new-run options: "
-                + ", ".join(conflicting)
+                "--resume cannot be combined with " + ", ".join(conflicts)
+            )
+    if args.status is not None:
+        conflicts = [
+            name
+            for name, value in (
+                ("--mode", args.mode),
+                ("--workers", args.workers),
+                ("--run-id", args.run_id),
+                ("--check", args.check),
+            )
+            if value is not None and value is not False
+        ]
+        if conflicts:
+            parser.error(
+                "--status cannot be combined with " + ", ".join(conflicts)
             )
     return args
 
 
-def _preflight_runtime() -> dict[str, Any]:
-    from rise_tvb379.runtime import capture_environment
-
+def _require_python_312() -> None:
     if sys.version_info[:2] != (3, 12):
         raise RuntimeError(
-            "This project requires Python 3.12 for numerical "
-            f"reproducibility; current interpreter is {sys.version.split()[0]}. "
-            "Create/activate a Python 3.12 environment and try again."
+            "This project uses Python 3.12; the active interpreter is "
+            f"{sys.version.split()[0]}. Activate a Python 3.12 environment "
+            "and try again."
         )
-    environment = capture_environment(PINNED_RUNTIME)
-    versions = environment["packages"]
-    mismatches = [
-        f"{name}=={expected} (found {versions.get(name) or 'not installed'})"
-        for name, expected in PINNED_RUNTIME.items()
-        if versions.get(name) != expected
-    ]
-    if mismatches:
-        raise RuntimeError(
-            "Pinned runtime dependencies are missing or mismatched:\n  - "
-            + "\n  - ".join(mismatches)
-            + "\nInstall only the third-party dependencies with:\n"
-            "  python -m pip install -r requirements.txt"
-        )
-    return environment
 
 
-def _format_elapsed(seconds: float) -> str:
-    total_seconds = max(0, int(round(seconds)))
-    hours, remainder = divmod(total_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-
-def _aggregate_tvb_wall_seconds(
-    calibration_df: Any,
-    manifest_df: Any,
-) -> float:
-    """Sum every recorded TVB call, including separate calibration rows."""
-
-    return float(
-        calibration_df["wall_seconds"].sum()
-        + manifest_df["wall_seconds"].sum()
-    )
-
-
-def _configure_logging(run_dir: Path) -> None:
-    log_path = run_dir / "run.log"
-    formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(processName)s | "
-        "%(name)s | %(message)s"
-    )
-    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    file_handler.setFormatter(formatter)
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logging.basicConfig(
-        level=logging.INFO,
-        handlers=[file_handler, console_handler],
-        force=True,
-    )
-
-
-def _prepare_runtime_directories(run_dir: Path) -> None:
-    runtime_root = run_dir / ".runtime"
-    tvb_home = runtime_root / "tvb"
-    matplotlib_home = runtime_root / "matplotlib"
-    tvb_home.mkdir(parents=True, exist_ok=True)
-    matplotlib_home.mkdir(parents=True, exist_ok=True)
-    os.environ["TVB_USER_HOME"] = str(tvb_home)
-    os.environ["MPLCONFIGDIR"] = str(matplotlib_home)
-
-
-def _materialize_new_run_inputs(
-    run_dir: Path,
-    data_dir: Path,
+def _configure_environment(
+    args: argparse.Namespace,
     *,
-    offline: bool,
-):
-    from rise_tvb379.data import (
-        SOURCE_SPECS,
-        SourceManifestRecord,
-        data_cache_from_environment,
-        download_sources,
-    )
-
-    cached_records = download_sources(
-        data_dir,
-        cache_dir=data_cache_from_environment(),
-        offline=offline,
-    )
-    copied_records = download_sources(
-        run_dir / "inputs",
-        cache_dir=data_dir,
-        offline=True,
-    )
-    cached_by_source = {record.source: record for record in cached_records}
-    records = tuple(
-        SourceManifestRecord(
-            source=copy.source,
-            path=copy.path,
-            sha256=copy.sha256,
-            retrieved_from=cached_by_source[
-                copy.source
-            ].retrieved_from,
-        )
-        for copy in copied_records
-    )
-    manifest_inputs = {
-        record.source: {
-            "path": record.path,
-            "sha256": record.sha256,
-            "source": record.source,
-            "url": SOURCE_SPECS[record.source].url,
-            "retrieved_from": record.retrieved_from,
-        }
-        for record in records
-    }
-    return records, manifest_inputs
-
-
-def _records_from_saved_manifest(manifest: dict[str, Any]):
-    from rise_tvb379.data import SourceManifestRecord
-
-    records = []
-    for name, value in sorted(manifest["inputs"].items()):
-        records.append(
-            SourceManifestRecord(
-                source=str(value.get("source", name)),
-                path=str(value["path"]),
-                sha256=str(value["sha256"]),
-                retrieved_from=str(
-                    value.get("retrieved_from", "saved verified run input")
-                ),
-            )
-        )
-    return tuple(records)
-
-
-def _execute_experiment(
-    *,
-    run_dir: Path,
-    config,
-    source_records,
-    run_manifest: dict[str, Any],
-    command_started: float,
-    execution: dict[str, Any],
-) -> Path:
-    from rise_tvb379.data import (
-        load_experiment_data,
-        source_manifest_dataframe,
-    )
-    from rise_tvb379.outputs import (
-        build_result_archive,
-        write_experiment_metadata,
-        write_output_tables,
-    )
-    from rise_tvb379.pipeline import (
-        build_experiment_metadata,
-        run_pipeline,
-    )
-    from rise_tvb379.plots import create_all_figures
-
-    # TVB configures logging during import. Restore the project handlers so
-    # every resumable block and final output remains visible and recorded.
-    _configure_logging(run_dir)
-    logger = logging.getLogger("rise_tvb379")
-    if execution["parallel_enabled"]:
-        logger.info(
-            "Optional process parallelism enabled: %d workers across %d "
-            "allocated CPUs; one native numerical thread per worker; "
-            "start method=%s",
-            execution["worker_count"],
-            execution["available_cpu_count"],
-            execution["multiprocessing_start_method"],
-        )
+    mode: str,
+) -> None:
+    os.environ["RISE_RUN_MODE"] = mode
+    if args.workers is None:
+        os.environ.pop("RISE_N_WORKERS", None)
     else:
-        logger.info(
-            "Single-process execution selected; use --workers auto or "
-            "--workers N to enable process parallelism"
-        )
-    data = load_experiment_data(run_dir / "inputs")
-    source_manifest_df = source_manifest_dataframe(source_records)
-    products = run_pipeline(
-        config,
-        data,
-        source_manifest_df=source_manifest_df,
-        run_dir=run_dir,
-        worker_count=int(execution["worker_count"]),
-    )
-    figures = create_all_figures(
-        calibration_df=products.calibration_df,
-        main_normalized_df=products.main_normalized_df,
-        primary_endpoint_df=products.primary_endpoint_df,
-        secondary_endpoint_df=products.secondary_endpoint_df,
-        counterfactual_comparison_df=(
-            products.counterfactual_comparison_df
-        ),
-        memory_counterfactual_comparison_df=(
-            products.memory_counterfactual_comparison_df
-        ),
-        matched_null_df=products.matched_null_df,
-        memory_matched_null_df=products.memory_matched_null_df,
-        main_seed=config.seeds[0],
-        sensitivity_endpoint_df=products.sensitivity_endpoint_df,
-        shuffle_contrast_df=products.shuffle_contrast_df,
-        observed_first_seed_df=products.observed_first_seed_df,
-        memory_observed_first_seed_df=(
-            products.memory_observed_first_seed_df
-        ),
-        periodic_probes=config.periodic_probes,
-        figure_dir=run_dir / "results" / "figures",
-    )
-    metadata = build_experiment_metadata(
-        config,
-        data,
-        source_manifest_df,
-        provenance={
-            "run_directory": str(run_dir),
-            "fingerprints": run_manifest["fingerprints"],
-            "environment_file": "environment.json",
-            "resolved_config_file": "resolved_config.json",
-            "inputs_file": "inputs.json",
-            "checkpoint_directory": "checkpoints",
-            "attempt_environment_directory": "attempts",
-            "execution": execution,
-        },
-    )
-    results_dir = run_dir / "results"
-    table_paths = write_output_tables(results_dir, products.tables)
-    metadata_path = write_experiment_metadata(
-        results_dir,
-        metadata,
-    )
-    manifest_df = products.tables["run_manifest"]
-    logger.info("Wrote %d CSV tables", len(table_paths))
-    logger.info("Wrote %d figures", len(figures))
-    logger.info("Metadata: %s", metadata_path)
-    logger.info("TVB simulations recorded: %d", len(manifest_df))
-    logger.info(
-        "Aggregate TVB simulation time, including calibration: %.2f minutes",
-        _aggregate_tvb_wall_seconds(
-            products.calibration_df,
-            manifest_df,
-        )
-        / 60.0,
-    )
-    logger.info(
-        "Command elapsed time before result-archive snapshot: %s",
-        _format_elapsed(time.perf_counter() - command_started),
-    )
-    expected_archive = (
-        run_dir / f"RISE_TVB379_results_{config.mode}.zip"
-    )
-    logger.info("Writing result archive: %s", expected_archive)
-    archive_path = build_result_archive(run_dir, config.mode)
-    logger.info("Result archive completed: %s", archive_path)
-    return archive_path
+        os.environ["RISE_N_WORKERS"] = str(args.workers)
 
+    if args.resume is not None:
+        os.environ["RISE_RUN_ID"] = (
+            f"resume_bootstrap_{os.getpid()}"
+        )
+    elif args.run_id is None:
+        os.environ.pop("RISE_RUN_ID", None)
+    else:
+        os.environ["RISE_RUN_ID"] = args.run_id
 
-def _run_new(
-    args: argparse.Namespace,
-    environment: dict[str, Any],
-    *,
-    command_started: float,
-) -> int:
-    from rise_tvb379.config import (
-        config_digest,
-        config_to_dict,
-        get_experiment_config,
-        workload_counts,
-    )
-    from rise_tvb379.runtime import (
-        create_run_directory,
-        initialize_run_status,
-        run_status_lifecycle,
-        write_attempt_environment,
-        write_run_manifest,
-    )
-
-    config = get_experiment_config(args.mode or "final")
-    output_root = (
-        args.output_root.expanduser()
-        if args.output_root is not None
-        else PROJECT_ROOT / "runs"
-    )
-    data_dir = (
-        args.data_dir.expanduser()
-        if args.data_dir is not None
-        else PROJECT_ROOT / "data"
-    )
-    run_dir = create_run_directory(
-        output_root,
-        config.mode,
-        config_digest(config),
-    )
-    _configure_logging(run_dir)
-    _prepare_runtime_directories(run_dir)
-    initialize_run_status(run_dir, mode=config.mode, status="created")
-    logger = logging.getLogger("rise_tvb379")
-    counts = workload_counts(config)
-    logger.info("Run directory: %s", run_dir)
-    logger.info(
-        "Starting %s mode: planned maximum %d manifested, %d calibration, "
-        "%d total TVB calls (conditional on convergence)",
-        config.mode,
-        counts.manifest,
-        counts.calibration,
-        counts.total,
-    )
-
-    archive_path: Path | None = None
-    with run_status_lifecycle(run_dir, mode=config.mode) as status:
-        attempt_environment_path = write_attempt_environment(
-            run_dir,
-            attempt=int(status["attempt"]),
-            environment=environment,
-        )
-        logger.info(
-            "Attempt environment: %s",
-            attempt_environment_path,
-        )
-        source_records, manifest_inputs = _materialize_new_run_inputs(
-            run_dir,
-            data_dir.resolve(),
-            offline=bool(args.offline),
-        )
-        run_manifest = write_run_manifest(
-            run_dir,
-            mode=config.mode,
-            resolved_config=config_to_dict(config),
-            project_root=PROJECT_ROOT,
-            inputs=manifest_inputs,
-            environment=environment,
-        )
-        archive_path = _execute_experiment(
-            run_dir=run_dir,
-            config=config,
-            source_records=source_records,
-            run_manifest=run_manifest,
-            command_started=command_started,
-            execution=environment["execution"],
-        )
-    print(f"Completed run: {run_dir}")
-    print(f"Result archive: {archive_path}")
-    return 0
-
-
-def _run_resume(
-    args: argparse.Namespace,
-    environment: dict[str, Any],
-    *,
-    command_started: float,
-) -> int:
-    from rise_tvb379.config import config_to_dict, get_experiment_config
-    from rise_tvb379.runtime import (
-        run_status_lifecycle,
-        validate_resume,
-        write_attempt_environment,
-    )
-
-    run_dir = args.resume.expanduser().resolve()
-    _configure_logging(run_dir)
-    _prepare_runtime_directories(run_dir)
-    run_manifest = validate_resume(
-        run_dir,
-        project_root=PROJECT_ROOT,
-        environment=environment,
-    )
-    config = get_experiment_config(str(run_manifest["mode"]))
-    if config_to_dict(config) != run_manifest["resolved_config"]:
-        raise RuntimeError(
-            "resume refused: resolved configuration no longer matches "
-            "the project configuration"
-        )
-    source_records = _records_from_saved_manifest(run_manifest)
-    logger = logging.getLogger("rise_tvb379")
-    logger.info("Resuming compatible run: %s", run_dir)
-    archive_path: Path | None = None
-    with run_status_lifecycle(run_dir, mode=config.mode) as status:
-        attempt_environment_path = write_attempt_environment(
-            run_dir,
-            attempt=int(status["attempt"]),
-            environment=environment,
-        )
-        logger.info(
-            "Attempt environment: %s",
-            attempt_environment_path,
-        )
-        archive_path = _execute_experiment(
-            run_dir=run_dir,
-            config=config,
-            source_records=source_records,
-            run_manifest=run_manifest,
-            command_started=command_started,
-            execution=environment["execution"],
-        )
-    print(f"Completed resumed run: {run_dir}")
-    print(f"Result archive: {archive_path}")
-    return 0
+    os.environ["RISE_DATA_CACHE"] = str(args.data_cache.resolve())
+    os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def main(argv: list[str] | None = None) -> int:
-    command_started = time.perf_counter()
     args = parse_args(argv)
-    try:
-        from rise_tvb379.parallel import (
-            available_cpu_count,
-            configure_native_thread_limits,
-            execution_details,
-        )
+    if args.status is not None:
+        run_dir = args.status.expanduser().resolve()
+        try:
+            status = read_run_status(run_dir)
+        except RunStateError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 1
+        print(format_run_status(run_dir, status))
+        return 0
 
-        configure_native_thread_limits(1)
-        environment = _preflight_runtime()
-        available_workers = available_cpu_count()
-        requested_workers = args.workers
-        resolved_workers = (
-            available_workers
-            if requested_workers is None
-            else min(requested_workers, available_workers)
-        )
-        execution = execution_details(resolved_workers)
-        execution["requested_worker_count"] = (
-            "auto" if requested_workers is None else requested_workers
-        )
-        execution["worker_count_capped_to_allocation"] = (
-            requested_workers is not None
-            and requested_workers > available_workers
-        )
-        environment["execution"] = execution
-        if args.resume is not None:
-            return _run_resume(
-                args,
-                environment,
-                command_started=command_started,
+    _require_python_312()
+    validation = validate_notebook()
+    print(format_validation_summary(validation), flush=True)
+    if args.check:
+        print("Static ScienceReady smoke check passed; no TVB calls ran.")
+        return 0
+
+    resume_dir = (
+        args.resume.expanduser().resolve()
+        if args.resume is not None
+        else None
+    )
+    if resume_dir is None:
+        mode = args.mode or "final"
+    else:
+        try:
+            saved_status = read_run_status(resume_dir)
+        except RunStateError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 1
+        if saved_status.get("state") == "completed":
+            print(
+                f"Error: run is already completed: {resume_dir}.",
+                file=sys.stderr,
             )
-        return _run_new(
-            args,
-            environment,
-            command_started=command_started,
+            return 1
+        mode = str(saved_status.get("mode", ""))
+        if mode not in validation.workloads:
+            print(
+                f"Error: saved run mode is invalid: {mode!r}.",
+                file=sys.stderr,
+            )
+            return 1
+
+    _configure_environment(args, mode=mode)
+    os.chdir(PROJECT_ROOT)
+    try:
+        run_notebook(
+            validation=validation,
+            resume_dir=resume_dir,
         )
     except KeyboardInterrupt:
-        print("Run interrupted; use --resume RUN_DIR to continue.", file=sys.stderr)
+        if resume_dir is None:
+            print(
+                "Run interrupted; the run directory printed above can be "
+                "passed to --resume.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Run interrupted; resume again with --resume {resume_dir}.",
+                file=sys.stderr,
+            )
         return 130
     except Exception as error:
-        logging.getLogger("rise_tvb379").exception("Experiment failed")
         print(f"Error: {error}", file=sys.stderr)
         return 1
+    return 0
 
 
 if __name__ == "__main__":
