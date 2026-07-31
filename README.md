@@ -16,12 +16,10 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-## Run Experiments
+## Run experiments
 
 The direct entry point executes the unmodified canonical notebook
 [`RISE_TVB379_Semantic_Episodic_Final_RawTraceExport_20260731.ipynb`](notebooks/RISE_TVB379_Semantic_Episodic_Final_RawTraceExport_20260731.ipynb).
-Its locked SHA-256 is
-`b48167b64c0480599e25dc228b37f835b3df11fa741c251d7c3e6245797f933e`.
 
 The script uses all CPUs visible to the process by default, with one native numerical thread per worker process:
 
@@ -93,4 +91,36 @@ rise_tvb379_work/
 ├── source_data/
 ├── results_semantic_episodic_v3_<mode>/
 └── RISE_TVB379_results_semantic_episodic_v3_<mode>.zip
+```
+
+## Run experiments on BU SCC
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/ocoke/tvb-auditory-alz.git
+cd tvb-auditory-alz
+```
+
+### 2. Set up Python 3.12 venv
+```bash
+mkdir -p logs/
+
+module purge
+module load python3/3.12.4
+
+python -m venv venvs/tvb
+source venvs/tvb/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 4. Submit to queue
+
+```bash
+qsub run_tvb.sh
 ```
