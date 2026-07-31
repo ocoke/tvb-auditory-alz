@@ -1,4 +1,4 @@
-"""Validation and direct execution of the canonical DTGateFixed notebook.
+"""Validation and direct execution of the canonical RawTraceExport notebook.
 
 The experiment intentionally has one scientific implementation: the code cells
 in the canonical notebook.  This module provides only the non-scientific
@@ -27,10 +27,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_NOTEBOOK = (
     PROJECT_ROOT
     / "notebooks"
-    / "RISE_TVB379_Semantic_Episodic_Final_DTGateFixed_20260730.ipynb"
+    / "RISE_TVB379_Semantic_Episodic_Final_RawTraceExport_20260731.ipynb"
 )
 CANONICAL_SHA256 = (
-    "c581e82979e158690a7689cca89426818fb2eaa146f9309aa5613d8897e3b92e"
+    "b48167b64c0480599e25dc228b37f835b3df11fa741c251d7c3e6245797f933e"
+)
+COMPATIBLE_PREDECESSOR_NOTEBOOK_SHA256S = frozenset(
+    {
+        # Canonical DTGateFixed 20260730. Its main_full_field checkpoints
+        # are deliberately invalidated because they contain no raw traces.
+        "c581e82979e158690a7689cca89426818fb2eaa146f9309aa5613d8897e3b92e",
+    }
 )
 EXPECTED_CELL_COUNT = 40
 EXPECTED_CODE_CELL_COUNT = 18
@@ -55,6 +62,7 @@ class Workload:
     local_counterfactual_calls: int
     parameter_sensitivity_calls: int
     spatial_shuffle_calls: int
+    raw_trace_shards: int
 
 
 @dataclass(frozen=True)
@@ -118,6 +126,10 @@ def _configuration_literals(code_source: str) -> dict[str, Any]:
         "PROBES",
         "PERIODIC_PROBES",
         "PULSE_ANALYSIS_END_MS",
+        "TRACE_EXPORT_SCOPES",
+        "TRACE_FORMAT_VERSION",
+        "TRACE_ARCHIVE_SUBDIRECTORY",
+        "TRACE_CHECKPOINT_TAG",
     }
     values: dict[str, Any] = {}
     for statement in ast.parse(code_source).body:
@@ -166,6 +178,11 @@ def _resolved_workloads(configuration: dict[str, Any]) -> dict[str, Workload]:
             mode_config["spatial_shuffles"]
             * periodic_probes_per_block
         )
+        raw_trace_shards = (
+            len(mode_config["severities"])
+            * len(mode_config["seeds"])
+            * len(configuration["PROBES"])
+        )
         manifested = (
             main
             + integration_step
@@ -183,13 +200,14 @@ def _resolved_workloads(configuration: dict[str, Any]) -> dict[str, Workload]:
             local_counterfactual_calls=local_counterfactual,
             parameter_sensitivity_calls=parameter_sensitivity,
             spatial_shuffle_calls=spatial_shuffle,
+            raw_trace_shards=raw_trace_shards,
         )
     return workloads
 
 
-def _output_counts(code_source: str) -> tuple[int, int]:
+def _output_contract(code_source: str) -> tuple[set[str], int]:
     tree = ast.parse(code_source)
-    output_table_count: int | None = None
+    output_names: set[str] | None = None
     for statement in tree.body:
         if not isinstance(statement, ast.Assign):
             continue
@@ -200,9 +218,11 @@ def _output_counts(code_source: str) -> tuple[int, int]:
             continue
         if not isinstance(statement.value, ast.Dict):
             raise ValueError("output_tables must be a dictionary literal.")
-        output_table_count = len(statement.value.keys)
+        output_names = {
+            str(ast.literal_eval(key)) for key in statement.value.keys
+        }
         break
-    if output_table_count is None:
+    if output_names is None:
         raise ValueError("Canonical notebook does not declare output_tables.")
 
     figure_count = sum(
@@ -211,7 +231,7 @@ def _output_counts(code_source: str) -> tuple[int, int]:
         and node.func.attr == "savefig"
         for node in ast.walk(tree)
     )
-    return output_table_count, figure_count
+    return output_names, figure_count
 
 
 def validate_notebook(
@@ -302,6 +322,17 @@ def validate_notebook(
         raise ValueError("Final mode must use 20 numerical seeds.")
     if configuration["PULSE_ANALYSIS_END_MS"] != 6000.0:
         raise ValueError("Pulse analysis must extend through 6000 ms.")
+    expected_trace_configuration = {
+        "TRACE_EXPORT_SCOPES": ("main_full_field",),
+        "TRACE_FORMAT_VERSION": "parcel_psp_v1",
+        "TRACE_ARCHIVE_SUBDIRECTORY": "main_parcel_traces",
+        "TRACE_CHECKPOINT_TAG": "raw-trace-v1",
+    }
+    for key, expected in expected_trace_configuration.items():
+        if configuration[key] != expected:
+            raise ValueError(
+                f"Canonical raw-trace field {key!r} must be {expected!r}."
+            )
 
     workloads = _resolved_workloads(configuration)
     actual_counts = {
@@ -313,10 +344,23 @@ def validate_notebook(
             "Locked workload mismatch: "
             f"expected {EXPECTED_WORKLOADS}, got {actual_counts}."
         )
-    csv_output_count, figure_output_count = _output_counts(complete_source)
-    if csv_output_count != 45 or figure_output_count != 6:
+    output_names, figure_output_count = _output_contract(complete_source)
+    required_new_outputs = {
+        "regional_features.csv",
+        "main_parcel_trace_manifest.csv",
+        "integration_step_outcome_eligibility.csv",
+    }
+    missing_new_outputs = required_new_outputs.difference(output_names)
+    if missing_new_outputs:
         raise ValueError(
-            "Locked output mismatch: expected 45 CSV tables and 6 figures, "
+            "Canonical raw-trace outputs are missing: "
+            + ", ".join(sorted(missing_new_outputs))
+            + "."
+        )
+    csv_output_count = len(output_names)
+    if csv_output_count != 48 or figure_output_count != 6:
+        raise ValueError(
+            "Locked output mismatch: expected 48 CSV tables and 6 figures, "
             f"got {csv_output_count} CSV tables and {figure_output_count} "
             "figures."
         )
@@ -334,7 +378,7 @@ def validate_notebook(
 
 def format_validation_summary(validation: NotebookValidation) -> str:
     lines = [
-        "Canonical DTGateFixed notebook validated:",
+        "Canonical RawTraceExport notebook validated:",
         f"  path: {validation.path}",
         f"  SHA-256: {validation.sha256}",
         (
@@ -355,6 +399,7 @@ def format_validation_summary(validation: NotebookValidation) -> str:
             f"{workload.integration_step_blocks} work units / "
             f"{workload.integration_step_calls} calls"
         )
+        lines[-1] += f"; raw-trace shards {workload.raw_trace_shards}"
     return "\n".join(lines)
 
 
@@ -403,15 +448,25 @@ def run_notebook(
                 if resume_dir is not None:
                     bootstrap_results_dir = Path(namespace["RESULTS_DIR"])
                     bootstrap_figure_dir = Path(namespace["FIGURE_DIR"])
+                    bootstrap_raw_trace_dir = Path(namespace["RAW_TRACE_DIR"])
                     namespace["RESULTS_DIR"] = resume_dir
                     namespace["FIGURE_DIR"] = resume_dir / "figures"
+                    namespace["RAW_TRACE_DIR"] = (
+                        resume_dir
+                        / str(namespace["TRACE_ARCHIVE_SUBDIRECTORY"])
+                    )
                     resume_dir.mkdir(parents=True, exist_ok=True)
                     namespace["FIGURE_DIR"].mkdir(
                         parents=True,
                         exist_ok=True,
                     )
+                    namespace["RAW_TRACE_DIR"].mkdir(
+                        parents=True,
+                        exist_ok=True,
+                    )
                     if bootstrap_results_dir.resolve() != resume_dir:
                         try:
+                            bootstrap_raw_trace_dir.rmdir()
                             bootstrap_figure_dir.rmdir()
                             bootstrap_results_dir.rmdir()
                         except OSError:
@@ -434,6 +489,9 @@ def run_notebook(
                             mode
                         ].integration_step_blocks
                     ),
+                    "planned_raw_trace_shards": (
+                        validation.workloads[mode].raw_trace_shards
+                    ),
                     "worker_processes": int(
                         namespace["PARALLEL_WORKERS"]
                     ),
@@ -444,6 +502,9 @@ def run_notebook(
                     )
                 else:
                     controller = RunController.resume(
+                        compatible_predecessor_notebook_sha256s=(
+                            COMPATIBLE_PREDECESSOR_NOTEBOOK_SHA256S
+                        ),
                         **controller_arguments
                     )
                 namespace["run_parallel_jobs"] = CheckpointDispatcher(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the canonical DTGateFixed TVB379 experiment without Jupyter."""
+"""Run the canonical RawTraceExport TVB379 experiment without Jupyter."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 
 from rise_tvb379.notebook_runner import (
+    COMPATIBLE_PREDECESSOR_NOTEBOOK_SHA256S,
     format_validation_summary,
     run_notebook,
     validate_notebook,
@@ -44,10 +45,10 @@ def _worker_count(value: str) -> int | None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the canonical DTGateFixed 379-region semantic-versus-"
+            "Run the canonical RawTraceExport 379-region semantic-versus-"
             "episodic musical-memory proxy experiment. The default is the "
             "locked 762-call final workload with 40 integration-step work "
-            "units."
+            "units and 180 lossless raw-trace shards."
         )
     )
     parser.add_argument(
@@ -96,14 +97,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         metavar="RUN_DIR",
-        help="resume one compatible incomplete DTGateFixed run",
+        help=(
+            "resume a compatible RawTraceExport run, or migrate the "
+            "validated DTGateFixed predecessor"
+        ),
     )
     parser.add_argument(
         "--status",
         type=Path,
         default=None,
         metavar="RUN_DIR",
-        help="print the saved status of a DTGateFixed run and exit",
+        help="print the saved status of a direct notebook run and exit",
     )
     return parser
 
@@ -193,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     validation = validate_notebook()
     print(format_validation_summary(validation), flush=True)
     if args.check:
-        print("Static DTGateFixed smoke check passed; no TVB calls ran.")
+        print("Static RawTraceExport smoke check passed; no TVB calls ran.")
         return 0
 
     resume_dir = (
@@ -209,7 +213,15 @@ def main(argv: list[str] | None = None) -> int:
         except RunStateError as error:
             print(f"Error: {error}", file=sys.stderr)
             return 1
-        if saved_status.get("state") == "completed":
+        completed_predecessor = (
+            saved_status.get("state") == "completed"
+            and saved_status.get("notebook_sha256")
+            in COMPATIBLE_PREDECESSOR_NOTEBOOK_SHA256S
+        )
+        if (
+            saved_status.get("state") == "completed"
+            and not completed_predecessor
+        ):
             print(
                 f"Error: run is already completed: {resume_dir}.",
                 file=sys.stderr,

@@ -121,6 +121,10 @@ def format_run_status(run_dir: Path, status: Mapping[str, Any]) -> str:
             f"{status.get('planned_integration_step_work_units', 0)} "
             "work units"
         ),
+        (
+            "Raw-trace plan: "
+            f"{status.get('planned_raw_trace_shards', 0)} shards"
+        ),
         f"Current stage: {status.get('current_stage') or 'none'}",
         f"Attempt: {status.get('attempt', 0)}",
         f"Updated: {status.get('updated_utc', 'unknown')}",
@@ -183,6 +187,26 @@ def _status_path(run_dir: Path) -> Path:
     return run_dir / STATUS_FILENAME
 
 
+def _legacy_main_stages(checkpoint_root: Path) -> set[str]:
+    """Find predecessor main stages whose results have no raw PSP arrays."""
+
+    stages: set[str] = set()
+    if not checkpoint_root.is_dir():
+        return stages
+    for manifest_path in checkpoint_root.glob("*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        description = str(manifest.get("description", ""))
+        if (
+            description.startswith("main_full_field ")
+            and "raw-trace-v1" not in description
+        ):
+            stages.add(str(manifest.get("stage", manifest_path.parent.name)))
+    return stages
+
+
 class RunController:
     """Own the atomic status file, progress log, and recovery accounting."""
 
@@ -218,6 +242,7 @@ class RunController:
         planned_total_tvb_calls: int,
         planned_integration_step_work_units: int,
         worker_processes: int,
+        planned_raw_trace_shards: int = 0,
     ) -> "RunController":
         run_dir = run_dir.resolve()
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -240,6 +265,7 @@ class RunController:
             "planned_integration_step_work_units": int(
                 planned_integration_step_work_units
             ),
+            "planned_raw_trace_shards": int(planned_raw_trace_shards),
             "completed_tvb_calls": 0,
             "completed_work": {},
             "restored_tvb_calls_this_attempt": 0,
@@ -282,19 +308,34 @@ class RunController:
         planned_total_tvb_calls: int,
         planned_integration_step_work_units: int,
         worker_processes: int,
+        planned_raw_trace_shards: int = 0,
+        compatible_predecessor_notebook_sha256s: Sequence[str] = (),
     ) -> "RunController":
         run_dir = run_dir.resolve()
         status = read_run_status(run_dir)
+        saved_notebook_sha256 = str(status.get("notebook_sha256", ""))
+        saved_code_sha256 = str(status.get("execution_code_sha256", ""))
+        predecessor_migration = (
+            saved_notebook_sha256 != notebook_sha256
+            and saved_notebook_sha256
+            in set(compatible_predecessor_notebook_sha256s)
+        )
         mismatches: list[str] = []
-        if status.get("state") == "completed":
+        if status.get("state") == "completed" and not predecessor_migration:
             raise RunStateError(f"Run is already completed: {run_dir}.")
         if status.get("mode") != mode:
             mismatches.append(
                 f"mode {status.get('mode')!r} != {mode!r}"
             )
-        if status.get("notebook_sha256") != notebook_sha256:
+        if (
+            saved_notebook_sha256 != notebook_sha256
+            and not predecessor_migration
+        ):
             mismatches.append("canonical notebook SHA-256")
-        if status.get("execution_code_sha256") != code_sha256:
+        if (
+            saved_code_sha256 != code_sha256
+            and not predecessor_migration
+        ):
             mismatches.append("Python execution-code SHA-256")
         if status.get("environment") != dict(environment):
             mismatches.append("Python or dependency versions")
@@ -306,12 +347,72 @@ class RunController:
             status.get("planned_integration_step_work_units", -1)
         ) != int(planned_integration_step_work_units):
             mismatches.append("integration-step work-unit plan")
+        saved_raw_trace_plan = status.get("planned_raw_trace_shards")
+        if (
+            not predecessor_migration
+            and saved_raw_trace_plan is not None
+            and int(saved_raw_trace_plan) != int(planned_raw_trace_shards)
+        ):
+            mismatches.append("raw-trace shard plan")
         if mismatches:
             raise RunStateError(
                 "Resume refused because compatibility checks differ: "
                 + ", ".join(mismatches)
                 + "."
             )
+
+        invalidated_main_calls = 0
+        if predecessor_migration:
+            legacy_pair = {
+                "notebook_sha256": saved_notebook_sha256,
+                "execution_code_sha256": saved_code_sha256,
+            }
+            compatible_pairs = status.setdefault(
+                "compatible_checkpoint_fingerprints",
+                [],
+            )
+            if legacy_pair not in compatible_pairs:
+                compatible_pairs.append(legacy_pair)
+
+            checkpoint_root = Path(status["checkpoint_root"])
+            legacy_main_stages = _legacy_main_stages(checkpoint_root)
+            completed_work = status.setdefault("completed_work", {})
+            legacy_main_stages.update(
+                str(key).split(":", 1)[0]
+                for key in completed_work
+                if "main_full_field" in str(key).split(":", 1)[0]
+                and "raw-trace-v1" not in str(key).split(":", 1)[0]
+            )
+            invalidated_keys = [
+                key
+                for key in completed_work
+                if str(key).split(":", 1)[0] in legacy_main_stages
+            ]
+            invalidated_main_calls = sum(
+                int(completed_work[key]) for key in invalidated_keys
+            )
+            for key in invalidated_keys:
+                del completed_work[key]
+            status["completed_tvb_calls"] = sum(
+                int(value) for value in completed_work.values()
+            )
+            migration = {
+                "migrated_utc": utc_now(),
+                "from_notebook_sha256": saved_notebook_sha256,
+                "to_notebook_sha256": notebook_sha256,
+                "from_execution_code_sha256": saved_code_sha256,
+                "to_execution_code_sha256": code_sha256,
+                "checkpoint_policy": (
+                    "reuse unchanged non-main scopes; force recomputation "
+                    "of main_full_field under raw-trace-v1"
+                ),
+                "invalidated_main_work_units": len(invalidated_keys),
+                "invalidated_main_tvb_calls": invalidated_main_calls,
+                "invalidated_main_stages": sorted(legacy_main_stages),
+            }
+            status.setdefault("checkpoint_migrations", []).append(migration)
+            status["notebook_sha256"] = notebook_sha256
+            status["execution_code_sha256"] = code_sha256
 
         now = utc_now()
         status["state"] = "running"
@@ -321,6 +422,7 @@ class RunController:
         status["exit_utc"] = None
         status["current_stage"] = "restoring"
         status["configured_worker_processes"] = int(worker_processes)
+        status["planned_raw_trace_shards"] = int(planned_raw_trace_shards)
         status["restored_tvb_calls_this_attempt"] = 0
         status["executed_tvb_calls_this_attempt"] = 0
         status["last_error"] = None
@@ -336,7 +438,37 @@ class RunController:
             f"Starting resume attempt {status['attempt']} with "
             f"{worker_processes} worker process(es)."
         )
+        if predecessor_migration:
+            controller.log(
+                "Migrated the validated DTGateFixed checkpoint set to "
+                "RawTraceExport: unchanged non-main scopes remain eligible; "
+                f"{len(invalidated_keys)} main work unit(s) / "
+                f"{invalidated_main_calls} TVB calls were invalidated and "
+                "will recompute under raw-trace-v1."
+            )
         return controller
+
+    def checkpoint_fingerprint_allowed(
+        self,
+        notebook_sha256: Any,
+        code_sha256: Any,
+    ) -> bool:
+        """Accept the current pair or an explicitly migrated predecessor."""
+
+        candidate = {
+            "notebook_sha256": str(notebook_sha256),
+            "execution_code_sha256": str(code_sha256),
+        }
+        current = {
+            "notebook_sha256": self.notebook_sha256,
+            "execution_code_sha256": self.code_sha256,
+        }
+        if candidate == current:
+            return True
+        return candidate in self.status.get(
+            "compatible_checkpoint_fingerprints",
+            [],
+        )
 
     def _write_status(self) -> None:
         self.status["updated_utc"] = utc_now()
@@ -516,6 +648,19 @@ def _job_weight(worker_name: str, job: Any) -> int:
     return 1
 
 
+def _checkpoint_job_payload(job: Any) -> Any:
+    """Keep unchanged non-main jobs stable across raw-trace migration."""
+
+    if (
+        isinstance(job, Mapping)
+        and job.get("export_parcel_traces") is False
+    ):
+        normalized = dict(job)
+        del normalized["export_parcel_traces"]
+        return normalized
+    return job
+
+
 def _execute_tagged_job(
     position: int,
     worker_function: Any,
@@ -557,7 +702,10 @@ class CheckpointDispatcher:
         joblib = self.namespace["joblib"]
         hashes = [
             joblib.hash(
-                {"worker": worker_name, "payload": job},
+                {
+                    "worker": worker_name,
+                    "payload": _checkpoint_job_payload(job),
+                },
                 hash_name="sha1",
             )
             for job in jobs
@@ -589,7 +737,30 @@ class CheckpointDispatcher:
                 raise RunStateError(
                     f"Cannot read checkpoint manifest {manifest_path}."
                 ) from error
-            if saved_manifest != manifest:
+            structural_keys = {
+                "schema_version",
+                "stage",
+                "description",
+                "worker",
+                "shared_args_hash",
+                "job_hashes",
+                "tvb_call_weights",
+            }
+            structurally_equal = (
+                isinstance(saved_manifest, dict)
+                and all(
+                    saved_manifest.get(key) == manifest.get(key)
+                    for key in structural_keys
+                )
+            )
+            fingerprint_allowed = (
+                isinstance(saved_manifest, dict)
+                and self.controller.checkpoint_fingerprint_allowed(
+                    saved_manifest.get("notebook_sha256"),
+                    saved_manifest.get("execution_code_sha256"),
+                )
+            )
+            if not structurally_equal or not fingerprint_allowed:
                 raise RunStateError(
                     f"Checkpoint manifest mismatch for {stage}."
                 )
@@ -738,10 +909,10 @@ class CheckpointDispatcher:
                 and marker.get("file") == checkpoint_path.name
                 and marker.get("stage") == stage
                 and marker.get("job_hash") == job_hash
-                and marker.get("notebook_sha256")
-                == self.controller.notebook_sha256
-                and marker.get("execution_code_sha256")
-                == self.controller.code_sha256
+                and self.controller.checkpoint_fingerprint_allowed(
+                    marker.get("notebook_sha256"),
+                    marker.get("execution_code_sha256"),
+                )
                 and marker.get("size_bytes") == checkpoint_path.stat().st_size
                 and marker.get("sha256") == sha256_file(checkpoint_path)
             )
@@ -763,13 +934,14 @@ class CheckpointDispatcher:
             return None
         expected = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
-            "notebook_sha256": self.controller.notebook_sha256,
-            "execution_code_sha256": self.controller.code_sha256,
             "stage": stage,
             "job_hash": job_hash,
         }
         if not isinstance(envelope, dict) or any(
             envelope.get(key) != value for key, value in expected.items()
+        ) or not self.controller.checkpoint_fingerprint_allowed(
+            envelope.get("notebook_sha256"),
+            envelope.get("execution_code_sha256"),
         ) or "outcome" not in envelope:
             self.controller.log(
                 f"{stage}: ignoring incompatible checkpoint "

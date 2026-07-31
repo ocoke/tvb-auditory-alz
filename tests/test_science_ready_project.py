@@ -11,6 +11,7 @@ import main
 from rise_tvb379.notebook_runner import (
     CANONICAL_NOTEBOOK,
     CANONICAL_SHA256,
+    COMPATIBLE_PREDECESSOR_NOTEBOOK_SHA256S,
     NotebookValidation,
     Workload,
     run_notebook,
@@ -53,17 +54,24 @@ def test_canonical_notebook_identity_structure_and_scope() -> None:
     assert amendment["name"] == "integration-step interaction gate"
     assert amendment["final_reference_seed_count"] == 20
     assert amendment["planned_final_tvb_calls"] == 762
-    assert validation.csv_output_count == 45
+    assert validation.csv_output_count == 48
     assert validation.figure_output_count == 6
     notebook_code = "\n".join(
         source for _, source in validation.code_cells
     )
     for diagnostic_output in (
+        "regional_features.csv",
+        "main_parcel_trace_manifest.csv",
+        "integration_step_outcome_eligibility.csv",
         "integration_step_interaction_seed_diagnostics.csv",
         "integration_step_a1_snr_seed_diagnostics.csv",
         "integration_step_raw_metric_seed_diagnostics.csv",
     ):
         assert diagnostic_output in notebook_code
+    assert "if len(TRACE_REGION_LABELS) != 34" in notebook_code
+    assert "stimulated_psp=selected_stimulated" in notebook_code
+    assert "control_psp=selected_control" in notebook_code
+    assert "evoked_psp=selected_evoked" in notebook_code
 
 
 def test_canonical_code_is_clean_and_outputs_are_cleared() -> None:
@@ -80,7 +88,6 @@ def test_canonical_code_is_clean_and_outputs_are_cleared() -> None:
     for disallowed in (
         "music_minus_speech",
         "speech_network",
-        "checkpoint",
         "resume",
         "todo",
         "placeholder",
@@ -102,6 +109,7 @@ def test_locked_workload_counts() -> None:
         local_counterfactual_calls=4,
         parameter_sensitivity_calls=6,
         spatial_shuffle_calls=6,
+        raw_trace_shards=6,
     )
     assert workloads["pilot"] == Workload(
         total_calls=85,
@@ -113,6 +121,7 @@ def test_locked_workload_counts() -> None:
         local_counterfactual_calls=8,
         parameter_sensitivity_calls=24,
         spatial_shuffle_calls=15,
+        raw_trace_shards=18,
     )
     assert workloads["final"] == Workload(
         total_calls=762,
@@ -124,6 +133,7 @@ def test_locked_workload_counts() -> None:
         local_counterfactual_calls=80,
         parameter_sensitivity_calls=120,
         spatial_shuffle_calls=150,
+        raw_trace_shards=180,
     )
 
 
@@ -159,6 +169,7 @@ def test_check_path_never_executes_notebook(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
     assert "final: 762 total calls (750 manifested)" in output
     assert "integration step 40 work units / 160 calls" in output
+    assert "raw-trace shards 180" in output
     assert "no TVB calls ran" in output
 
 
@@ -313,6 +324,104 @@ def test_resume_refuses_environment_mismatch(tmp_path: Path) -> None:
         )
 
 
+def test_dtgate_migration_recomputes_main_and_restores_other_scopes(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "results_migration"
+    environment = {"python": "test"}
+    predecessor_sha = next(
+        iter(COMPATIBLE_PREDECESSOR_NOTEBOOK_SHA256S)
+    )
+    old_controller = RunController.create(
+        run_dir=run_dir,
+        mode="smoke",
+        notebook_sha256=predecessor_sha,
+        code_sha256="old-code",
+        environment=environment,
+        planned_total_tvb_calls=2,
+        planned_integration_step_work_units=0,
+        worker_processes=1,
+    )
+    namespace = {
+        "joblib": _PickleJoblib,
+        "PARALLEL_WORKERS": 1,
+    }
+    executed: list[str] = []
+
+    def worker(job):
+        executed.append(str(job["scope"]))
+        return {"scope": str(job["scope"])}
+
+    old_dispatcher = CheckpointDispatcher(namespace, old_controller)
+    old_dispatcher(
+        worker,
+        [{"scope": "main_full_field", "probes": ()}],
+        (),
+        "main_full_field condition-seed blocks",
+    )
+    old_dispatcher(
+        worker,
+        [{"scope": "local_fixed", "probes": ()}],
+        (),
+        "local_fixed condition-seed blocks",
+    )
+    old_controller.mark_completed()
+
+    resumed = RunController.resume(
+        run_dir=run_dir,
+        mode="smoke",
+        notebook_sha256="raw-trace-notebook",
+        code_sha256="new-code",
+        environment=environment,
+        planned_total_tvb_calls=2,
+        planned_integration_step_work_units=0,
+        worker_processes=1,
+        planned_raw_trace_shards=1,
+        compatible_predecessor_notebook_sha256s={predecessor_sha},
+    )
+    migrated_status = read_run_status(run_dir)
+    assert migrated_status["completed_tvb_calls"] == 1
+    assert migrated_status["state"] == "running"
+    assert migrated_status["checkpoint_migrations"][0][
+        "invalidated_main_tvb_calls"
+    ] == 1
+
+    new_dispatcher = CheckpointDispatcher(namespace, resumed)
+    new_dispatcher(
+        worker,
+        [
+            {
+                "scope": "main_full_field",
+                "probes": (),
+                "export_parcel_traces": True,
+            }
+        ],
+        (),
+        "main_full_field raw-trace-v1 condition-seed blocks",
+    )
+    new_dispatcher(
+        worker,
+        [
+            {
+                "scope": "local_fixed",
+                "probes": (),
+                "export_parcel_traces": False,
+            }
+        ],
+        (),
+        "local_fixed condition-seed blocks",
+    )
+    resumed.mark_completed()
+
+    assert executed == ["main_full_field", "local_fixed", "main_full_field"]
+    final_status = read_run_status(run_dir)
+    assert final_status["state"] == "completed"
+    assert final_status["restored_tvb_calls_this_attempt"] == 1
+    assert final_status["executed_tvb_calls_this_attempt"] == 1
+    log = (run_dir / PROGRESS_LOG_FILENAME).read_text(encoding="utf-8")
+    assert "will recompute under raw-trace-v1" in log
+
+
 def test_damaged_checkpoint_is_recomputed(tmp_path: Path) -> None:
     run_dir = tmp_path / "results_test"
     environment = {"python": "test"}
@@ -443,3 +552,4 @@ def test_status_cli_reads_status_without_starting_run(
     assert "State: running" in output
     assert "TVB progress: 0/34 calls (0.0%)" in output
     assert "Integration-step plan: 2 work units" in output
+    assert "Raw-trace plan: 0 shards" in output
