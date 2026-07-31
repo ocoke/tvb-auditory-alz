@@ -7,7 +7,7 @@
 #$ -o /projectnb/riseprac/tvb-auditory-alz/logs/
 #$ -pe omp 32
 #$ -l h_rt=12:00:00
-#$ -l mem_per_core=4G
+#$ -l mem_per_core=2G
 
 set -euo pipefail
 
