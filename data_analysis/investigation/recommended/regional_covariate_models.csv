@@ -1,0 +1,3 @@
+probe,parcel_count,rank,predictor_count_excluding_intercept,r_squared,adjusted_r_squared,residual_degrees_freedom,analysis_status
+2Hz,32,6,5,0.3300542519236329,0.2012185311397161,26,Exploratory parcel-level OLS; numerical seeds averaged within parcel
+5Hz,32,6,5,0.32774736744331834,0.1984680150285718,26,Exploratory parcel-level OLS; numerical seeds averaged within parcel

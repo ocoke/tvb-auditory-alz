@@ -1,0 +1,6 @@
+pair,outcome,probe,unit,numerical_initializations,mean_interaction,median_interaction,minimum_interaction,maximum_interaction,ci95_lower_numerical,ci95_upper_numerical,paired_hedges_gz,positive_fraction,sign_consistent,mean_interaction_curvature
+expanded_bilateral,transfer_gain,2Hz,log2 ratio,20,0.6623415477889104,0.6368511701836947,0.41011614533586993,0.9169423841977942,0.6109764756315966,0.7137066199462242,5.793547217666491,1.0,True,
+expanded_bilateral,transfer_gain,5Hz,log2 ratio,20,0.6626642325889744,0.6493398197909324,0.4155374236871534,0.9408517427713843,0.6061414319662035,0.7191870332117454,5.2674486736606525,1.0,True,
+expanded_bilateral,functional_connectivity,2Hz,Fisher-z difference,20,0.07290912819975273,0.07286450711099479,0.06677116908890568,0.07937822181337095,0.0711825220644767,0.07463573433502876,18.972260548282662,1.0,True,
+expanded_bilateral,functional_connectivity,5Hz,Fisher-z difference,20,0.0858301367809218,0.08487749151361856,0.0717653185075291,0.10018859708960992,0.08268683018198397,0.08897344337985963,12.26827536033403,1.0,True,
+expanded_bilateral,response_latency,pulse,ms,20,,,,,,,,0.9,False,

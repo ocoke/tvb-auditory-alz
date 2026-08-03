@@ -1,0 +1,10 @@
+source_contrast,reported_region,spm99_x,spm99_y,spm99_z,hcp_label,mapping_distance_mm,mapping_note
+semantic > episodic,bilateral medial frontal cortex (BA 11/10),0,60,10,R_9m,1.0,nearest volumetric HCP-MMP parcel
+semantic > episodic,bilateral medial frontal cortex (BA 11/10),-4,18,-18,L_25,0.0,coordinate falls inside parcel
+semantic > episodic,right middle temporal gyrus (BA 21),56,4,-24,R_TE1a,0.0,coordinate falls inside parcel
+semantic > episodic,left inferior/middle temporal gyri (BA 20/21),-48,-26,-22,L_TF,0.0,coordinate falls inside parcel
+semantic > episodic,left inferior/middle temporal gyri (BA 20/21),-54,-2,-18,L_STSda,0.0,coordinate falls inside parcel
+episodic > semantic,right precuneus/parietal cortex (BA 7/19),36,-66,38,R_IP1,2.0,nearest volumetric HCP-MMP parcel
+episodic > semantic,precuneus (BA 7),4,-56,42,R_PCV,0.0,coordinate falls inside parcel
+episodic > semantic,right superior frontal gyrus (BA 11),34,52,-14,R_11l,1.0,nearest parcel consistent with reported BA11 anatomy; volumetric boundary
+episodic > semantic,right middle frontal gyrus (BA 8/9),38,12,44,R_8Av,1.0,nearest volumetric HCP-MMP parcel

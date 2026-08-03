@@ -16,3 +16,4 @@ venv/
 data/
 runs/
 rise_tvb379_work/
+.playwright-cli

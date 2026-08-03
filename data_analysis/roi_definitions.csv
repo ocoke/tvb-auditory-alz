@@ -1,0 +1,142 @@
+network,analysis_role,evidence_component,label,hemisphere,zero_based_index,interpretation
+a1_input,stimulus,auditory_input,L_A1,L,23,Bilateral primary auditory cortex.
+a1_input,stimulus,auditory_input,R_A1,R,203,Bilateral primary auditory cortex.
+semantic_expanded,primary,union,L_9m,L,68,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,R_9m,R,248,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,L_10r,L,64,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,R_10r,R,244,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,L_10v,L,87,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,R_10v,R,267,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,L_8BM,L,62,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,R_8BM,R,242,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,L_25,L,163,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,R_25,R,343,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,R_TE1a,R,311,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,L_TF,L,134,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+semantic_expanded,primary,union,L_STSda,L,127,Primary expanded musical-semantic-associated proxy: bilateral medial-prefrontal/anterior-cingulate core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_31pd,L,160,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_31pd,R,340,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_31pv,L,34,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_31pv,R,214,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_d23ab,L,33,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_d23ab,R,213,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_v23ab,L,32,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_v23ab,R,212,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_23d,L,31,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_23d,R,211,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_31a,L,161,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_31a,R,341,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_PCV,L,26,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_PCV,R,206,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,L_7m,L,29,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_7m,R,209,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_IP1,R,324,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_11l,R,270,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+episodic_expanded,primary,union,R_8Av,R,246,Primary expanded musical-episodic-associated proxy: bilateral posterior-cingulate/precuneus core plus Platel musical-task peaks.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_9m,L,68,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_9m,R,248,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_10r,L,64,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_10r,R,244,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_10v,L,87,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_10v,R,267,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_8BM,L,62,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_8BM,R,242,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_25,L,163,Bilateral medial-prefrontal/anterior-cingulate core.
+semantic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_25,R,343,Bilateral medial-prefrontal/anterior-cingulate core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_31pd,L,160,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_31pd,R,340,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_31pv,L,34,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_31pv,R,214,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_d23ab,L,33,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_d23ab,R,213,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_v23ab,L,32,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_v23ab,R,212,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_23d,L,31,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_23d,R,211,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_31a,L,161,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_31a,R,341,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_PCV,L,26,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_PCV,R,206,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,L_7m,L,29,Bilateral posterior-cingulate/medial-parietal core.
+episodic_anatomical_core,definition_sensitivity,revised_anatomical_core,R_7m,R,209,Bilateral posterior-cingulate/medial-parietal core.
+semantic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,R_9m,R,248,HCP-MMP parcels mapped from Platel semantic-greater-than-episodic musical-memory cortical peaks.
+semantic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,L_25,L,163,HCP-MMP parcels mapped from Platel semantic-greater-than-episodic musical-memory cortical peaks.
+semantic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,R_TE1a,R,311,HCP-MMP parcels mapped from Platel semantic-greater-than-episodic musical-memory cortical peaks.
+semantic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,L_TF,L,134,HCP-MMP parcels mapped from Platel semantic-greater-than-episodic musical-memory cortical peaks.
+semantic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,L_STSda,L,127,HCP-MMP parcels mapped from Platel semantic-greater-than-episodic musical-memory cortical peaks.
+episodic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,R_IP1,R,324,HCP-MMP parcels mapped from Platel episodic-greater-than-semantic musical-memory cortical peaks.
+episodic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,R_PCV,R,206,HCP-MMP parcels mapped from Platel episodic-greater-than-semantic musical-memory cortical peaks.
+episodic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,R_11l,R,270,HCP-MMP parcels mapped from Platel episodic-greater-than-semantic musical-memory cortical peaks.
+episodic_platel_peaks,definition_sensitivity,platel_2003_direct_contrast,R_8Av,R,246,HCP-MMP parcels mapped from Platel episodic-greater-than-semantic musical-memory cortical peaks.
+semantic_expanded_left,laterality_sensitivity,union_left,L_9m,L,68,Left-hemisphere portion of semantic_expanded.
+semantic_expanded_left,laterality_sensitivity,union_left,L_10r,L,64,Left-hemisphere portion of semantic_expanded.
+semantic_expanded_left,laterality_sensitivity,union_left,L_10v,L,87,Left-hemisphere portion of semantic_expanded.
+semantic_expanded_left,laterality_sensitivity,union_left,L_8BM,L,62,Left-hemisphere portion of semantic_expanded.
+semantic_expanded_left,laterality_sensitivity,union_left,L_25,L,163,Left-hemisphere portion of semantic_expanded.
+semantic_expanded_left,laterality_sensitivity,union_left,L_TF,L,134,Left-hemisphere portion of semantic_expanded.
+semantic_expanded_left,laterality_sensitivity,union_left,L_STSda,L,127,Left-hemisphere portion of semantic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_31pd,L,160,Left-hemisphere portion of episodic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_31pv,L,34,Left-hemisphere portion of episodic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_d23ab,L,33,Left-hemisphere portion of episodic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_v23ab,L,32,Left-hemisphere portion of episodic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_23d,L,31,Left-hemisphere portion of episodic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_31a,L,161,Left-hemisphere portion of episodic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_PCV,L,26,Left-hemisphere portion of episodic_expanded.
+episodic_expanded_left,laterality_sensitivity,union_left,L_7m,L,29,Left-hemisphere portion of episodic_expanded.
+semantic_expanded_right,laterality_sensitivity,union_right,R_9m,R,248,Right-hemisphere portion of semantic_expanded.
+semantic_expanded_right,laterality_sensitivity,union_right,R_10r,R,244,Right-hemisphere portion of semantic_expanded.
+semantic_expanded_right,laterality_sensitivity,union_right,R_10v,R,267,Right-hemisphere portion of semantic_expanded.
+semantic_expanded_right,laterality_sensitivity,union_right,R_8BM,R,242,Right-hemisphere portion of semantic_expanded.
+semantic_expanded_right,laterality_sensitivity,union_right,R_25,R,343,Right-hemisphere portion of semantic_expanded.
+semantic_expanded_right,laterality_sensitivity,union_right,R_TE1a,R,311,Right-hemisphere portion of semantic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_31pd,R,340,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_31pv,R,214,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_d23ab,R,213,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_v23ab,R,212,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_23d,R,211,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_31a,R,341,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_PCV,R,206,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_7m,R,209,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_IP1,R,324,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_11l,R,270,Right-hemisphere portion of episodic_expanded.
+episodic_expanded_right,laterality_sensitivity,union_right,R_8Av,R,246,Right-hemisphere portion of episodic_expanded.
+shared_auditory_relay,diagnostic_only,auditory_relay,L_52,L,102,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,R_52,R,282,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,L_MBelt,L,172,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,R_MBelt,R,352,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,L_LBelt,L,173,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,R_LBelt,R,353,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,L_RI,L,103,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,R_RI,R,283,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,L_PBelt,L,123,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,R_PBelt,R,303,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,L_A4,L,174,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,R_A4,R,354,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,L_A5,L,124,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+shared_auditory_relay,diagnostic_only,auditory_relay,R_A5,R,304,"Shared belt, parabelt, retroinsular, and auditory-association context; not part of either primary target average."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TGd,L,130,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TGd,R,310,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TGv,L,171,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TGv,R,351,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TE1a,L,131,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TE1a,R,311,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TE1m,L,176,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TE1m,R,356,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TE1p,L,132,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TE1p,R,312,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TE2a,L,133,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TE2a,R,313,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TE2p,L,135,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TE2p,R,315,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_TF,L,134,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_TF,R,314,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,L_STSda,L,127,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+anterior_temporal_context,diagnostic_only,semantic_context,R_STSda,R,307,"Anterior/lateral temporal conceptual context, saved separately to avoid arbitrarily broadening the primary proxy."
+hippocampal_context,diagnostic_only,memory_context,Left-Hippocampus,L,365,Bilateral hippocampal context. The Jansen-Rit simulation does not implement encoding or recollection.
+hippocampal_context,diagnostic_only,memory_context,Right-Hippocampus,R,374,Bilateral hippocampal context. The Jansen-Rit simulation does not implement encoding or recollection.
+angular_parietal_context,diagnostic_only,memory_context,L_PGi,L,149,"Angular/inferior-parietal context, reported separately."
+angular_parietal_context,diagnostic_only,memory_context,R_PGi,R,329,"Angular/inferior-parietal context, reported separately."
+angular_parietal_context,diagnostic_only,memory_context,L_PGs,L,150,"Angular/inferior-parietal context, reported separately."
+angular_parietal_context,diagnostic_only,memory_context,R_PGs,R,330,"Angular/inferior-parietal context, reported separately."
+angular_parietal_context,diagnostic_only,memory_context,L_PGp,L,142,"Angular/inferior-parietal context, reported separately."
+angular_parietal_context,diagnostic_only,memory_context,R_PGp,R,322,"Angular/inferior-parietal context, reported separately."

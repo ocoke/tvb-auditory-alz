@@ -1,0 +1,25 @@
+stage,seed,severity,condition,probe,network,a1_frequency_passed,target_response_coverage,response_coverage_passed,transfer_valid,evoked_fc_split_abs_z,fc_valid_fraction,functional_connectivity_valid,latency_valid_fraction,median_pulse_tail_energy_fraction,response_latency_valid,target_frequency_qa_valid_fraction,frequency_locked_transfer_valid,transfer_split_abs_log2,transfer_nonstationary_flag,required_metric_gate_passed
+technical_preflight,11,0.0,Baseline,pulse,semantic_expanded,True,1.0,True,False,,,False,1.0,3.477452349107245e-08,True,,False,,False,True
+technical_preflight,11,0.0,Baseline,pulse,episodic_expanded,True,1.0,True,False,,,False,1.0,2.3415996124298023e-08,True,,False,,False,True
+technical_preflight,11,0.0,Baseline,2Hz,semantic_expanded,True,1.0,True,True,0.013629165312071478,1.0,True,,,False,1.0,True,0.0009038994020175013,False,True
+technical_preflight,11,0.0,Baseline,2Hz,episodic_expanded,True,1.0,True,True,0.003143060990934643,1.0,True,,,False,1.0,True,0.0003048914659249467,False,True
+technical_preflight,11,0.0,Baseline,5Hz,semantic_expanded,True,1.0,True,True,0.00014680958867407945,1.0,True,,,False,1.0,True,0.0003242731242837851,False,True
+technical_preflight,11,0.0,Baseline,5Hz,episodic_expanded,True,1.0,True,True,0.00019089749001821588,1.0,True,,,False,1.0,True,8.807887742245967e-05,False,True
+technical_preflight,23,0.0,Baseline,pulse,semantic_expanded,True,1.0,True,False,,,False,1.0,3.496806491465084e-08,True,,False,,False,True
+technical_preflight,23,0.0,Baseline,pulse,episodic_expanded,True,1.0,True,False,,,False,1.0,2.3770703047958406e-08,True,,False,,False,True
+technical_preflight,23,0.0,Baseline,2Hz,semantic_expanded,True,1.0,True,True,0.013534080785436498,1.0,True,,,False,1.0,True,0.0009001447380844708,False,True
+technical_preflight,23,0.0,Baseline,2Hz,episodic_expanded,True,1.0,True,True,0.003123973458306395,1.0,True,,,False,1.0,True,0.00030360463378987997,False,True
+technical_preflight,23,0.0,Baseline,5Hz,semantic_expanded,True,1.0,True,True,0.00013906268239405328,1.0,True,,,False,1.0,True,0.00032231852809420464,False,True
+technical_preflight,23,0.0,Baseline,5Hz,episodic_expanded,True,1.0,True,True,0.00019525772626849403,1.0,True,,,False,1.0,True,8.706001652259691e-05,False,True
+technical_preflight,11,1.0,High AD-like perturbation,pulse,semantic_expanded,True,1.0,True,False,,,False,0.8461538461538461,0.013179407508191677,True,,False,,False,True
+technical_preflight,11,1.0,High AD-like perturbation,pulse,episodic_expanded,True,1.0,True,False,,,False,1.0,0.004136566425577127,True,,False,,False,True
+technical_preflight,11,1.0,High AD-like perturbation,2Hz,semantic_expanded,True,1.0,True,True,0.008684215553425596,1.0,True,,,False,0.15384615384615385,False,0.9896995154316053,False,True
+technical_preflight,11,1.0,High AD-like perturbation,2Hz,episodic_expanded,True,1.0,True,True,0.027176237865368658,1.0,True,,,False,0.6842105263157895,False,1.2508489468236665,True,True
+technical_preflight,11,1.0,High AD-like perturbation,5Hz,semantic_expanded,True,1.0,True,True,0.009519007988167676,1.0,True,,,False,0.0,False,1.0382296515656082,True,True
+technical_preflight,11,1.0,High AD-like perturbation,5Hz,episodic_expanded,True,1.0,True,True,0.029745243854639475,1.0,True,,,False,0.5263157894736842,False,1.2992964769733033,True,True
+technical_preflight,23,1.0,High AD-like perturbation,pulse,semantic_expanded,True,1.0,True,False,,,False,0.9230769230769231,0.01592281224947224,True,,False,,False,True
+technical_preflight,23,1.0,High AD-like perturbation,pulse,episodic_expanded,True,1.0,True,False,,,False,1.0,0.01042885109837787,True,,False,,False,True
+technical_preflight,23,1.0,High AD-like perturbation,2Hz,semantic_expanded,True,1.0,True,True,0.005612585019269534,1.0,True,,,False,0.23076923076923078,False,1.0076176750989956,True,True
+technical_preflight,23,1.0,High AD-like perturbation,2Hz,episodic_expanded,True,1.0,True,True,0.008804559032785396,1.0,True,,,False,0.631578947368421,False,1.4305658662827354,True,True
+technical_preflight,23,1.0,High AD-like perturbation,5Hz,semantic_expanded,True,1.0,True,True,0.0030855829346746744,1.0,True,,,False,0.23076923076923078,False,1.0725194199073793,True,True
+technical_preflight,23,1.0,High AD-like perturbation,5Hz,episodic_expanded,True,1.0,True,True,0.03600857819841351,1.0,True,,,False,0.5263157894736842,False,0.9323727093219949,False,True

@@ -65,6 +65,42 @@ interval conclusion still terminates the run. An exceeded exact-magnitude
 precision target is recorded and warned about but does not terminate an
 otherwise valid run.
 
+### Extended late-window follow-up
+
+The separate `main_extended.py` entry point executes the unmodified canonical
+notebook
+[`RISE_TVB379_Semantic_Episodic_Final_LateWindowFollowup_20260802.ipynb`](notebooks/RISE_TVB379_Semantic_Episodic_Final_LateWindowFollowup_20260802.ipynb),
+whose locked SHA-256 is
+`6c272953f8813c00af808a86c4c1aef1d8fa4c2acca3baa88947e498eab18c54`.
+It preserves all 762 primary calls and adds the complete prolonged experiment
+at 0.5 ms and 0.25 ms:
+
+```bash
+python main_extended.py --check
+python main_extended.py --mode smoke --workers 2
+python main_extended.py --mode final --workers auto \
+  --run-id semantic_episodic_late_followup_final
+```
+
+| Mode | Unchanged primary | Prolonged 0.5 ms | Prolonged 0.25 ms | Manifested calls | Trace shards | Total TVB calls |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `smoke` | 34 | 8 | 8 | 48 | 10 | **50** |
+| `pilot` | 85 | 24 | 24 | 127 | 30 | **133** |
+| `final` | 762 | 240 | 240 | 1,230 | 300 | **1,242** |
+
+Final mode adds 60 condition/seed blocks at each prolonged integration step.
+Each block contains four genuine TVB calls: zero input, DC matched, 2 Hz, and
+5 Hz. The block is one atomic checkpoint, and progress advances by all four
+calls only after its saved result is complete. The combined status plan has
+100 integration-reference work units and 400 associated calls: the original
+40-work-unit gate plus 60 prolonged 0.25 ms blocks.
+
+The extended result contains 68 CSV tables, eight PNG figures, and 300 lossless
+trace shards: 180 unchanged primary shards plus 60 prolonged shards at each
+integration step. Its `run_manifest.csv` has 1,230 calls; the 12 calibration
+calls remain recorded separately in the coupling diagnostic, exactly as in the
+primary notebook.
+
 ## Progress and recovery
 
 Every bounded worker result is checkpointed atomically, and progress is written
@@ -73,6 +109,8 @@ to both the terminal and `<run-dir>/progress.log`. Inspect or resume a run with:
 ```bash
 python main.py --status /path/to/run-directory
 python main.py --resume /path/to/run-directory --workers auto
+python main_extended.py --status /path/to/extended-run-directory
+python main_extended.py --resume /path/to/extended-run-directory --workers auto
 ```
 
 Resume requires the same mode, Python/dependency environment, input hashes,
@@ -82,6 +120,11 @@ eligible, while every old `main_full_field` checkpoint is invalidated and all
 main blocks recompute under the `raw-trace-v1` tag. This is required because
 the predecessor checkpoints did not contain the raw PSP arrays. Subsequent
 resumes reuse completed `raw-trace-v1` main checkpoints normally.
+
+Extended runs use the same atomic status, log, and checkpoint machinery, but
+`main_extended.py --resume` accepts only an incomplete run created from the
+exact extended notebook and matching execution environment. It does not alter
+or migrate a completed primary result directory.
 
 Missing cache files are downloaded by the notebook and checked against its
 pinned SHA-256 values. Results are written under:
